@@ -9,7 +9,14 @@ console.log('Supabase Key exists:', !!supabaseAnonKey)
 console.log('Supabase Key length:', supabaseAnonKey?.length)
 console.log('Supabase Key first 20 chars:', supabaseAnonKey?.substring(0, 20))
 
-// 创建客户端
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// 创建客户端，添加明确的配置选项
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false
+  }
+})
 
 console.log('Supabase client created:', !!supabase)
+console.log('Supabase auth URL:', supabase.auth?.url)
