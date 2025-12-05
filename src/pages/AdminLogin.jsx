@@ -16,6 +16,11 @@ export default function AdminLogin() {
     setError(null)
 
     try {
+      // 检查 Supabase 是否已配置
+      if (!supabase) {
+        throw new Error('数据库未配置，请联系管理员')
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -26,7 +31,7 @@ export default function AdminLogin() {
       navigate('/admin/dashboard')
     } catch (error) {
       console.error('Login error:', error)
-      setError('登录失败：邮箱或密码错误')
+      setError(error.message || '登录失败：邮箱或密码错误')
     } finally {
       setLoading(false)
     }

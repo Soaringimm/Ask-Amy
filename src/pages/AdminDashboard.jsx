@@ -20,6 +20,10 @@ export default function AdminDashboard() {
   }, [activeTab])
 
   const checkAuth = async () => {
+    if (!supabase) {
+      navigate('/admin/login')
+      return
+    }
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       navigate('/admin/login')
@@ -29,6 +33,9 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true)
     try {
+      if (!supabase) {
+        return
+      }
       if (activeTab === 'consultations') {
         const { data, error } = await supabase
           .from('consultations')
@@ -52,12 +59,17 @@ export default function AdminDashboard() {
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    if (supabase) {
+      await supabase.auth.signOut()
+    }
     navigate('/admin/login')
   }
 
   const handleUpdateConsultation = async (id, updates) => {
     try {
+      if (!supabase) {
+        throw new Error('数据库未配置')
+      }
       const { error } = await supabase
         .from('consultations')
         .update(updates)
@@ -75,6 +87,9 @@ export default function AdminDashboard() {
   const handleCreateArticle = async (e) => {
     e.preventDefault()
     try {
+      if (!supabase) {
+        throw new Error('数据库未配置')
+      }
       const { error } = await supabase
         .from('articles')
         .insert([articleForm])
@@ -93,6 +108,9 @@ export default function AdminDashboard() {
     if (!confirm('确定要删除这篇文章吗？')) return
 
     try {
+      if (!supabase) {
+        throw new Error('数据库未配置')
+      }
       const { error } = await supabase
         .from('articles')
         .delete()

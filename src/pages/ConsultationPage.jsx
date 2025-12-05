@@ -26,6 +26,11 @@ export default function ConsultationPage() {
     setError(null)
 
     try {
+      // 检查 Supabase 是否已配置
+      if (!supabase) {
+        throw new Error('数据库未配置，请联系管理员')
+      }
+
       const { error } = await supabase
         .from('consultations')
         .insert([
@@ -49,7 +54,7 @@ export default function ConsultationPage() {
       })
     } catch (error) {
       console.error('Error submitting consultation:', error)
-      setError('提交失败，请重试')
+      setError(error.message || '提交失败，请重试')
     } finally {
       setLoading(false)
     }
