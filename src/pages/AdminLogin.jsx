@@ -16,15 +16,21 @@ export default function AdminLogin() {
     setError(null)
 
     try {
+      console.log('开始登录，supabase 对象:', supabase)
+      console.log('Email:', email)
+
       // 检查 Supabase 是否已配置
       if (!supabase) {
         throw new Error('数据库未配置，请联系管理员')
       }
 
+      console.log('准备调用 signInWithPassword')
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
+
+      console.log('登录响应:', { data, error })
 
       if (error) throw error
 
