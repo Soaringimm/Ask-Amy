@@ -1,289 +1,211 @@
 import { useState, useEffect } from 'react'
-import { FaSearch, FaHeart, FaChevronRight, FaArrowLeft } from 'react-icons/fa'
+import { FaSearch, FaHeart, FaArrowLeft, FaSpinner } from 'react-icons/fa'
+import { searchQuestions, getQuestionDetail } from '../lib/ircc'
 
 export default function KnowledgeBasePage() {
-  const [knowledgeBase, setKnowledgeBase] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [selectedCategory, setSelectedCategory] = useState(null)
-  const [selectedQuestion, setSelectedQuestion] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  
+  const [selectedQuestionId, setSelectedQuestionId] = useState(null)
+  const [questionDetail, setQuestionDetail] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  
   const [showPaymentModal, setShowPaymentModal] = useState(false)
 
-  useEffect(() => {
-    loadKnowledgeBase()
-  }, [])
+  const handleSearch = async (e) => {
+    e?.preventDefault()
+    
+    if (!query.trim()) return
 
-  const loadKnowledgeBase = async () => {
+    setLoading(true)
+    setError(null)
+    setHasSearched(true)
+    
     try {
-      const response = await fetch('/data/knowledge-base.json')
-      const data = await response.json()
-      setKnowledgeBase(data)
-      console.log('✅ 已加载知识库')
-    } catch (error) {
-      console.error('无法加载知识库:', error)
+      const data = await searchQuestions(query)
+      setResults(data)
+    } catch {
+      setError('Search failed. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleCategoryClick = (category) => {
-    setSelectedCategory(category)
-    setSelectedQuestion(null)
-  }
+  // Fetch detail when a question is selected
+  useEffect(() => {
+    async function loadDetail() {
+      if (!selectedQuestionId) {
+        setQuestionDetail(null)
+        return
+      }
 
-  const handleQuestionClick = (question) => {
-    setSelectedQuestion(question)
-  }
-
-  const handleBack = () => {
-    if (selectedQuestion) {
-      setSelectedQuestion(null)
-    } else if (selectedCategory) {
-      setSelectedCategory(null)
+      setDetailLoading(true)
+      try {
+        // Default to Chinese (zh) as per project context
+        const data = await getQuestionDetail(selectedQuestionId, 'zh')
+        setQuestionDetail(data)
+      } catch {
+        setError('Failed to load question details.')
+      } finally {
+        setDetailLoading(false)
+      }
     }
-  }
+
+    loadDetail()
+  }, [selectedQuestionId])
 
   const handleDonate = () => {
     setShowPaymentModal(true)
   }
 
-  // 搜索过滤
-  const getFilteredCategories = () => {
-    if (!knowledgeBase || !searchQuery) return knowledgeBase?.categories || []
-
-    return knowledgeBase.categories.map(category => ({
-      ...category,
-      questions: category.questions.filter(q =>
-        q.question_cn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        q.question_en.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        q.answer_cn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        q.answer_en.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    })).filter(category => category.questions.length > 0)
+  const handleBack = () => {
+    setSelectedQuestionId(null)
+    setQuestionDetail(null)
   }
-
-  if (loading) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="text-center py-20">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-          <p className="mt-4 text-gray-600">加载中...</p>
-        </div>
-      </div>
-    )
-  }
-
-  const filteredCategories = getFilteredCategories()
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* 页面标题 */}
+      {/* Header */}
       <div className="mb-8">
         <h1 className="text-4xl font-bold text-gray-900 mb-4">
           知识库 Knowledge Base
         </h1>
         <p className="text-gray-600">
-          浏览加拿大移民相关的常见问题和专业解答
+          Search official IRCC answers (Powered by IRCC Help Centre API)
         </p>
       </div>
 
-      {/* 搜索框 */}
-      <div className="mb-8">
-        <div className="relative">
-          <FaSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="搜索问题或关键词... Search questions or keywords..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value)
-              setSelectedCategory(null)
-              setSelectedQuestion(null)
-            }}
-            className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          />
-        </div>
-      </div>
-
-      {/* 面包屑导航 */}
-      {(selectedCategory || selectedQuestion) && (
-        <div className="mb-6 flex items-center space-x-2 text-sm">
-          <button
-            onClick={() => {
-              setSelectedCategory(null)
-              setSelectedQuestion(null)
-            }}
-            className="text-primary-600 hover:underline"
-          >
-            所有分类
-          </button>
-          {selectedCategory && (
-            <>
-              <FaChevronRight className="text-gray-400" />
-              <button
-                onClick={() => setSelectedQuestion(null)}
-                className={`${
-                  selectedQuestion ? 'text-primary-600 hover:underline' : 'text-gray-600'
-                }`}
-              >
-                {selectedCategory.title_cn}
-              </button>
-            </>
-          )}
-          {selectedQuestion && (
-            <>
-              <FaChevronRight className="text-gray-400" />
-              <span className="text-gray-600">{selectedQuestion.question_cn}</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* 第一层：分类列表 */}
-      {!selectedCategory && !selectedQuestion && (
+      {/* Detail View */}
+      {selectedQuestionId ? (
         <div>
-          {filteredCategories.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-xl shadow-sm">
-              <p className="text-gray-500">
-                {searchQuery ? '没有找到相关内容，请尝试其他关键词' : '暂无内容'}
-              </p>
+          <button
+            onClick={handleBack}
+            className="flex items-center text-primary-600 hover:underline mb-6"
+          >
+            <FaArrowLeft className="mr-2" />
+            返回搜索 Results
+          </button>
+
+          {detailLoading ? (
+             <div className="text-center py-20">
+              <FaSpinner className="animate-spin h-10 w-10 text-primary-600 mx-auto" />
+              <p className="mt-4 text-gray-600">Loading details...</p>
+            </div>
+          ) : questionDetail ? (
+            <div className="bg-white rounded-xl shadow-sm p-8">
+              {/* Title */}
+              <div className="mb-8 pb-6 border-b">
+                <h2 className="text-3xl font-bold text-gray-900 mb-3">
+                  {questionDetail.title}
+                </h2>
+                <div className="text-sm text-gray-500">
+                  Question ID: {questionDetail.qnum} | Last Updated: {questionDetail.last_modified || 'N/A'}
+                </div>
+              </div>
+
+              {/* Content */}
+              <div 
+                className="prose max-w-none text-gray-700"
+                dangerouslySetInnerHTML={{ __html: questionDetail.content }}
+              />
+
+              {/* Donate Section */}
+              <div className="border-t mt-12 pt-6">
+                <p className="text-gray-600 mb-4">
+                  如果这个回答对您有帮助，欢迎自愿打赏支持
+                </p>
+                <button
+                  onClick={handleDonate}
+                  className="bg-red-500 text-white px-6 py-2 rounded-lg hover:bg-red-600 transition flex items-center"
+                >
+                  <FaHeart className="mr-2" />
+                  打赏支持 Donate
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="grid md:grid-cols-3 gap-6">
-              {filteredCategories.map((category) => (
+            <div className="text-red-500">Error loading details.</div>
+          )}
+        </div>
+      ) : (
+        /* Search View */
+        <div>
+          {/* Search Input Form */}
+          <form onSubmit={handleSearch} className="mb-8 relative flex gap-2">
+            <div className="relative flex-grow">
+              <FaSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="输入关键词搜索 (e.g. 学签, work permit)..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent shadow-sm"
+              />
+            </div>
+            <button 
+              type="submit"
+              disabled={loading}
+              className="px-6 py-3 bg-primary-600 text-white font-medium rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
+            >
+              {loading ? 'Searching...' : 'Search'}
+            </button>
+          </form>
+
+          {/* Loading State */}
+          {loading && (
+            <div className="text-center py-12">
+              <FaSpinner className="animate-spin h-8 w-8 text-gray-400 mx-auto" />
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && (
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
+              <p className="text-red-700">{error}</p>
+            </div>
+          )}
+
+          {/* Results List */}
+          {!loading && results.length > 0 && (
+            <div className="space-y-4">
+              {results.map((item) => (
                 <div
-                  key={category.id}
-                  onClick={() => handleCategoryClick(category)}
-                  className="bg-white p-6 rounded-xl shadow-sm hover:shadow-md transition cursor-pointer border-2 border-transparent hover:border-primary-500"
+                  key={item.qnum}
+                  onClick={() => setSelectedQuestionId(item.qnum)}
+                  className="bg-white p-6 rounded-xl shadow-sm hover:shadow-md transition cursor-pointer border-l-4 border-primary-500 hover:bg-gray-50"
                 >
-                  <div className="text-5xl mb-4">{category.icon}</div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">
-                    {category.title_cn}
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {item.title}
                   </h3>
-                  <p className="text-gray-600 text-sm mb-4">{category.title_en}</p>
-                  <p className="text-gray-500 text-sm mb-4">{category.description}</p>
-                  <div className="flex items-center text-primary-600 font-semibold">
-                    <span>{category.questions.length} 个问题</span>
-                    <FaChevronRight className="ml-2" />
-                  </div>
+                  <p className="text-gray-600 text-sm line-clamp-2">
+                    {item.snippet.replace(/<[^>]*>|\[.*?\]/g, '')}
+                  </p>
                 </div>
               ))}
             </div>
           )}
+
+          {/* Empty State */}
+          {!loading && !error && results.length === 0 && hasSearched && (
+            <div className="text-center py-12 bg-white rounded-xl shadow-sm">
+              <p className="text-gray-500">没有找到相关结果</p>
+            </div>
+          )}
+
+          {/* Initial State */}
+          {!loading && !error && !hasSearched && (
+            <div className="text-center py-20 text-gray-500">
+              <p>请输入关键词并点击搜索</p>
+              <p className="text-sm mt-2">支持中文和英文搜索</p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 第二层：问题列表 */}
-      {selectedCategory && !selectedQuestion && (
-        <div>
-          <button
-            onClick={handleBack}
-            className="flex items-center text-primary-600 hover:underline mb-6"
-          >
-            <FaArrowLeft className="mr-2" />
-            返回分类列表
-          </button>
-
-          <div className="bg-gradient-to-r from-primary-50 to-blue-50 p-6 rounded-xl mb-6">
-            <div className="text-4xl mb-3">{selectedCategory.icon}</div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">
-              {selectedCategory.title_cn}
-            </h2>
-            <p className="text-gray-700">{selectedCategory.title_en}</p>
-          </div>
-
-          <div className="space-y-4">
-            {selectedCategory.questions.map((question, index) => (
-              <div
-                key={question.id}
-                onClick={() => handleQuestionClick(question)}
-                className="bg-white p-5 rounded-xl shadow-sm hover:shadow-md transition cursor-pointer border-l-4 border-primary-500"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center mb-2">
-                      <span className="bg-primary-100 text-primary-700 text-sm font-bold px-3 py-1 rounded-full mr-3">
-                        Q{index + 1}
-                      </span>
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {question.question_cn}
-                      </h3>
-                    </div>
-                    <p className="text-gray-600 ml-12">{question.question_en}</p>
-                  </div>
-                  <FaChevronRight className="text-gray-400 mt-2 ml-4 flex-shrink-0" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 第三层：问题详情 */}
-      {selectedQuestion && (
-        <div>
-          <button
-            onClick={handleBack}
-            className="flex items-center text-primary-600 hover:underline mb-6"
-          >
-            <FaArrowLeft className="mr-2" />
-            返回问题列表
-          </button>
-
-          <div className="bg-white rounded-xl shadow-sm p-8">
-            {/* 问题标题 */}
-            <div className="mb-8 pb-6 border-b">
-              <h2 className="text-3xl font-bold text-gray-900 mb-3">
-                {selectedQuestion.question_cn}
-              </h2>
-              <p className="text-xl text-gray-600">{selectedQuestion.question_en}</p>
-            </div>
-
-            {/* 中文答案 */}
-            <div className="mb-8">
-              <div className="flex items-center mb-4">
-                <span className="bg-red-100 text-red-700 text-sm font-bold px-3 py-1 rounded">
-                  中文
-                </span>
-              </div>
-              <div className="prose max-w-none text-gray-700 whitespace-pre-wrap">
-                {selectedQuestion.answer_cn}
-              </div>
-            </div>
-
-            {/* 分隔线 */}
-            <div className="border-t my-8"></div>
-
-            {/* 英文答案 */}
-            <div className="mb-8">
-              <div className="flex items-center mb-4">
-                <span className="bg-blue-100 text-blue-700 text-sm font-bold px-3 py-1 rounded">
-                  English
-                </span>
-              </div>
-              <div className="prose max-w-none text-gray-700 whitespace-pre-wrap">
-                {selectedQuestion.answer_en}
-              </div>
-            </div>
-
-            {/* 打赏按钮 */}
-            <div className="border-t pt-6">
-              <p className="text-gray-600 mb-4">
-                如果这个回答对您有帮助，欢迎自愿打赏支持
-              </p>
-              <button
-                onClick={handleDonate}
-                className="bg-red-500 text-white px-6 py-2 rounded-lg hover:bg-red-600 transition flex items-center"
-              >
-                <FaHeart className="mr-2" />
-                打赏支持 Donate
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 打赏弹窗 */}
+      {/* Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">

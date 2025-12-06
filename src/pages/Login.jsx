@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import { FaLock } from 'react-icons/fa';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { FaSignInAlt } from 'react-icons/fa';
 
-export default function AdminLogin() {
+export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const { signIn } = useAuth();
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -16,33 +17,8 @@ export default function AdminLogin() {
     setError(null);
 
     try {
-      if (!supabase) {
-        throw new Error('数据库未配置，请联系管理员');
-      }
-
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (authError) throw authError;
-
-      // After successful login, fetch the user's profile to check their role
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (profileError) throw profileError;
-
-      if (profileData.role !== 'admin') {
-        // If not an admin, sign them out immediately
-        await supabase.auth.signOut();
-        throw new Error('您无权访问此管理页面。请联系管理员。');
-      }
-
-      navigate('/admin/dashboard');
+      await signIn(email, password);
+      navigate('/'); // Redirect to home page or client dashboard after successful login
     } catch (err) {
       console.error('Login error:', err);
       setError(err.message || '登录失败：邮箱或密码错误');
@@ -55,9 +31,9 @@ export default function AdminLogin() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <FaLock className="text-5xl text-primary-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-gray-900">管理员登录</h1>
-          <p className="text-gray-600 mt-2">请输入您的管理员凭据</p>
+          <FaSignInAlt className="text-5xl text-primary-600 mx-auto mb-4" />
+          <h1 className="text-3xl font-bold text-gray-900">登录您的账户</h1>
+          <p className="text-gray-600 mt-2">请输入您的凭据</p>
         </div>
 
         <form onSubmit={handleLogin} className="bg-white rounded-xl shadow-sm p-8">
@@ -79,7 +55,7 @@ export default function AdminLogin() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                placeholder="admin@example.com"
+                placeholder="you@example.com"
               />
             </div>
 
@@ -106,6 +82,12 @@ export default function AdminLogin() {
               {loading ? '登录中...' : '登录'}
             </button>
           </div>
+          <p className="mt-6 text-center text-sm text-gray-600">
+            没有账户？{' '}
+            <Link to="/signup" className="font-medium text-primary-600 hover:text-primary-500">
+              立即注册
+            </Link>
+          </p>
         </form>
       </div>
     </div>
