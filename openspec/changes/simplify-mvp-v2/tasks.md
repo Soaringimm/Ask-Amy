@@ -45,13 +45,13 @@
 - [x] 5.4 Update `KnowledgeBasePage.jsx` to track and pass language context
 
 ## 6. Testing with Claude for Chrome
-- [ ] 6.1 Test Cal.com booking flow
-- [ ] 6.2 Test blog article listing and detail pages
-- [ ] 6.3 Test IRCC search with Chinese input
-- [ ] 6.4 Test IRCC search with English input
-- [ ] 6.5 Test admin article management (create/edit/publish)
+- [x] 6.1 Test Cal.com booking flow
+- [x] 6.2 Test blog article listing and detail pages
+- [x] 6.3 Test IRCC search with Chinese input
+- [x] 6.4 Test IRCC search with English input
+- [x] 6.5 Test admin article management (create/edit/publish)
 
 ## 7. Cleanup
 - [x] 7.1 Remove unused imports and dead code
-- [ ] 7.2 Update `openspec/project.md` with new architecture
+- [x] 7.2 Update `openspec/project.md` with new architecture
 - [x] 7.3 Verify all routes work correctly (build passed)
