@@ -19,15 +19,15 @@ ALTER TABLE aa_articles ENABLE ROW LEVEL SECURITY;
 CREATE INDEX aa_articles_slug_idx ON aa_articles(slug);
 CREATE INDEX aa_articles_published_idx ON aa_articles(published_at DESC) WHERE published_at IS NOT NULL;
 
--- Policies
+-- Policies (using is_admin() from profiles to avoid recursion)
 CREATE POLICY "Anyone can view published articles"
   ON aa_articles FOR SELECT
   USING (published_at IS NOT NULL);
 
 CREATE POLICY "Admins can view all articles"
   ON aa_articles FOR SELECT
-  USING (EXISTS (SELECT 1 FROM aa_profiles WHERE aa_profiles.id = auth.uid() AND aa_profiles.role = 'admin'));
+  USING (is_admin());
 
 CREATE POLICY "Admins can manage articles"
   ON aa_articles FOR ALL
-  USING (EXISTS (SELECT 1 FROM aa_profiles WHERE aa_profiles.id = auth.uid() AND aa_profiles.role = 'admin'));
+  USING (is_admin());
