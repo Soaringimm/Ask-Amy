@@ -1,14 +1,26 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { FaCheckCircle } from 'react-icons/fa'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function ConsultationPage() {
+  const { user } = useAuth()
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     question: '',
     deadline: '',
   })
+
+  useEffect(() => {
+    if (user && user.email) {
+      setFormData(prev => ({
+        ...prev,
+        email: user.email
+      }))
+    }
+  }, [user])
+
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -35,6 +47,7 @@ export default function ConsultationPage() {
         .from('consultations')
         .insert([
           {
+            user_id: user ? user.id : null,
             name: formData.name,
             email: formData.email,
             question: formData.question,

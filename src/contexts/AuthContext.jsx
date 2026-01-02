@@ -93,7 +93,7 @@ export const AuthProvider = ({ children }) => {
     if (error) throw error;
     setUser(null);
     setProfile(null);
-    navigate('/login'); // Redirect to login page after sign out
+    // Navigation should be handled by the component calling signOut
   };
 
   const updateProfile = async (updates) => {
