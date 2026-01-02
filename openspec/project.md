@@ -1,55 +1,62 @@
 # Project Context
 
 ## Purpose
-**Ask Amy (Ask Amy 咨询平台)** is a consultancy platform built for knowledge monetization. It serves two main audiences:
-1.  **Clients:** Can browse a knowledge base of professional advice (likely immigration/IRCC related), make voluntary tips via WeChat/Alipay, and request personalized consultations. Clients can register/login to track their requests and manage their profile, or (optionally) submit as guests.
-2.  **Admin (Amy):** A dashboard to manage consultation requests, provide quotes, update request status, and manage knowledge base articles.
+**Ask Amy (Ask Amy 咨询平台)** is a consultancy platform for immigration advice. It serves:
+1. **Visitors (Guests):** Browse knowledge base, search IRCC Q&A, read articles, and book consultations via Cal.com. No login required.
+2. **Admin (Amy):** Dashboard to manage articles, view Cal.com bookings, and manage content.
 
 ## Tech Stack
 - **Frontend:** React 19, React Router v7, Tailwind CSS, Vite 7.
-- **Backend:** Supabase (PostgreSQL, Auth, Storage).
+- **Backend:** Supabase (PostgreSQL, Auth for admin, Storage for images).
+- **Booking:** Cal.com (embedded calendar, API for admin booking list).
 - **Language:** JavaScript (ES Modules).
-- **Deployment:** Vercel (primary), Cloudflare Pages (secondary/configured).
-- **Key Libraries:** `date-fns` (dates), `react-icons` (icons), `@supabase/supabase-js`.
+- **Deployment:** Docker (self-hosted on ~/local infrastructure).
+- **Key Libraries:** `date-fns`, `react-icons`, `@supabase/supabase-js`, `@calcom/embed-react`, `react-markdown`.
 
 ## Project Conventions
 
 ### Code Style
 - **Formatting:** Standard JavaScript/React formatting.
 - **Styling:** Tailwind CSS utility classes directly in JSX.
-- **Components:** Functional components with hooks. Located in `src/components`, `src/pages`, `src/layouts`.
+- **Components:** Functional components with hooks.
 - **Naming:** PascalCase for components (`HomePage.jsx`), camelCase for functions/variables.
 - **File Structure:**
     - `src/pages/`: Top-level route components.
-    - `src/layouts/`: Layout wrappers (e.g., `MainLayout.jsx`).
-    - `src/lib/`: Shared utilities (e.g., `supabase.js`).
+    - `src/layouts/`: Layout wrappers (`MainLayout.jsx`, `AdminLayout.jsx`).
+    - `src/lib/`: Shared utilities (`supabase.js`, `ircc.js`, `calcom.js`, `storage.js`).
+
+### Database Conventions
+- **Table Prefix:** All tables use `aa_` prefix (Ask Amy).
+- **Tables:** `aa_profiles`, `aa_articles`.
+- **Storage Buckets:** `aa_article_images`.
+- **Naming:** snake_case for all database objects.
 
 ### Architecture Patterns
 - **SPA (Single Page Application):** Client-side routing with React Router.
-- **BaaS (Backend-as-a-Service):** Heavy reliance on Supabase for database, authentication, and RLS (Row Level Security).
-- **Direct Database Access:** Client-side Supabase calls from components/pages.
+- **BaaS (Backend-as-a-Service):** Supabase for database, admin auth, and storage.
+- **Guest-First:** Public visitors don't need accounts; admin-only authentication.
+- **External Services:** Cal.com for booking, IRCC API for Q&A search.
 
 ### Testing Strategy
-- **Manual Testing:** Current strategy involves verifying frontend flows (submission, login) and backend data reflection in Supabase.
-- **Future:** No automated testing framework (Jest/Vitest) is currently set up in `package.json` scripts, though `eslint` is present for linting.
+- **Manual Testing:** Claude for Chrome for frontend flow verification.
+- **Linting:** ESLint for code quality.
 
 ### Git Workflow
 - **Main Branch:** `main`.
-- **Deployment:** Automatic deployment to Vercel/Cloudflare on push to `main`.
-- **Conventions:** Standard semantic commits (implied).
+- **Feature Branch:** `jacky`.
+- **Deployment:** Docker build on self-hosted infrastructure.
 
 ## Domain Context
-- **Consultancy:** The core business object is a "Consultation" which goes through states (Pending -> Quoted -> Paid/Completed).
-- **Knowledge Base:** "Articles" are the content unit, viewable by public, manageable by admin.
-- **Payment:** Currently manual (QR codes for WeChat/Alipay), with future plans for Stripe (CAD).
-- **IRCC:** "Immigration, Refugees and Citizenship Canada" - likely the domain of expertise based on data files (`ircc-topics-list.json`).
+- **Consultation:** Handled entirely by Cal.com (15min/30min meetings). Payment via WeChat/Alipay QR codes post-consultation.
+- **Knowledge Base:** Articles (Markdown with images) and IRCC Q&A search.
+- **IRCC API:** Auto-detects language (Chinese input → Chinese results, English input → English results).
 
 ## Important Constraints
-- **Authentication:** Dual authentication model (Admin & Client).
-- **Privacy:** RLS policies must strictly protect consultation data. Clients see only their own; Admins see all.
-- **Localization:** Current content is mix of Chinese (primary for UI/Docs) and potentially English (IRCC content). Future plan for multi-language.
+- **Authentication:** Admin-only (no client registration/login).
+- **Privacy:** RLS policies protect data; public can only see published articles.
+- **Payment:** Manual (WeChat/Alipay QR codes sent after booking).
 
 ## External Dependencies
-- **Supabase:** Critical dependency for all data and auth.
-- **Vercel/Cloudflare:** Hosting providers.
-- **IRCC Help Centre API:** Provides real-time Q&A search and content (imm_help.jackyzhang.app).
+- **Supabase:** Database, admin auth, storage.
+- **Cal.com:** Booking calendar and API.
+- **IRCC Help Centre API:** Q&A search (`imm_help.jackyzhang.app`).
