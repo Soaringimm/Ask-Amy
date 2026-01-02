@@ -29,7 +29,7 @@ export default function AdminLogin() {
 
       // After successful login, fetch the user's profile to check their role
       const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
+        .from('aa_profiles')
         .select('role')
         .eq('id', authData.user.id)
         .single();
