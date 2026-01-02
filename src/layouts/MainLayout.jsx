@@ -1,20 +1,7 @@
-import { Link, useNavigate } from 'react-router-dom'
-import { FaHome, FaBook, FaComments, FaUser, FaSignOutAlt, FaSignInAlt } from 'react-icons/fa'
-import { useAuth } from '../contexts/AuthContext'
+import { Link } from 'react-router-dom'
+import { FaHome, FaBook, FaComments, FaNewspaper, FaSearch } from 'react-icons/fa'
 
 export default function MainLayout({ children }) {
-  const { user, signOut } = useAuth()
-  const navigate = useNavigate()
-
-  const handleSignOut = async () => {
-    try {
-      await signOut()
-      navigate('/')
-    } catch (error) {
-      console.error('Error signing out:', error)
-    }
-  }
-
   return (
     <div className="min-h-screen flex flex-col">
       {/* 导航栏 */}
@@ -36,53 +23,23 @@ export default function MainLayout({ children }) {
                 to="/knowledge-base"
                 className="flex items-center space-x-1 text-gray-700 hover:text-primary-600 transition"
               >
-                <FaBook />
-                <span className="hidden md:inline">知识库</span>
+                <FaSearch />
+                <span className="hidden md:inline">IRCC问答</span>
+              </Link>
+              <Link
+                to="/articles"
+                className="flex items-center space-x-1 text-gray-700 hover:text-primary-600 transition"
+              >
+                <FaNewspaper />
+                <span className="hidden md:inline">文章</span>
               </Link>
               <Link
                 to="/consultation"
                 className="flex items-center space-x-1 text-gray-700 hover:text-primary-600 transition"
               >
                 <FaComments />
-                <span className="hidden md:inline">个性化咨询</span>
+                <span className="hidden md:inline">预约咨询</span>
               </Link>
-              
-              <div className="h-6 w-px bg-gray-300 mx-2"></div>
-
-              {user ? (
-                <div className="flex items-center space-x-4">
-                  <Link
-                    to="/profile"
-                    className="flex items-center space-x-1 text-gray-700 hover:text-primary-600 transition"
-                  >
-                    <FaUser />
-                    <span>我的账户</span>
-                  </Link>
-                  <button
-                    onClick={handleSignOut}
-                    className="flex items-center space-x-1 text-gray-500 hover:text-red-600 transition"
-                  >
-                    <FaSignOutAlt />
-                    <span>退出</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-4">
-                  <Link
-                    to="/login"
-                    className="flex items-center space-x-1 text-gray-700 hover:text-primary-600 transition"
-                  >
-                    <FaSignInAlt />
-                    <span>登录</span>
-                  </Link>
-                  <Link
-                    to="/signup"
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition text-sm font-medium"
-                  >
-                    注册
-                  </Link>
-                </div>
-              )}
             </div>
           </div>
         </div>

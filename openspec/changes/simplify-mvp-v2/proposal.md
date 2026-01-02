@@ -16,6 +16,7 @@ Current implementation has unnecessary complexity: user authentication system th
 - Admin manages availability in Cal.com dashboard (external)
 - Guest books directly through embedded Cal.com calendar
 - No custom `consultation_slots` table needed
+- Admin Dashboard shows booking list via Cal.com API
 
 ### 3. Blog System for Knowledge Base
 - Enhance `articles` table with `slug`, `excerpt`, `published_at`
@@ -23,6 +24,7 @@ Current implementation has unnecessary complexity: user authentication system th
 - Public listing page for published articles
 - Admin CRUD with publish/unpublish workflow
 - Content rendered with react-markdown (already in project)
+- Image upload to Supabase Storage with inline insertion to Markdown
 
 ### 4. IRCC API Language Detection
 - Detect input language (Chinese vs English)
@@ -33,6 +35,7 @@ Current implementation has unnecessary complexity: user authentication system th
 - Remove hardcoded Supabase URL/Key from `supabase.js`
 - Remove hardcoded IRCC API Key from `ircc.js`
 - Add `VITE_CAL_USERNAME` for Cal.com embed
+- Add `VITE_CAL_API_KEY` for Cal.com API (admin booking list)
 - Update `.env.example` with all required variables
 - Fail fast if required env vars missing
 

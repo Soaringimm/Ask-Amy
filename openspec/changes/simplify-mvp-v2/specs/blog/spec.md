@@ -42,3 +42,16 @@ Admin MUST be able to create, edit, publish, and delete articles with slug and e
 - **WHEN** admin clicks unpublish on a published article
 - **THEN** article is hidden from `/articles`
 - **AND** `published_at` is cleared
+
+### Requirement: Article Image Upload
+Admin MUST be able to upload images and insert them into article content.
+
+#### Scenario: Admin uploads image
+- **WHEN** admin clicks upload image button in article editor
+- **AND** selects an image file
+- **THEN** image is uploaded to Supabase Storage `article-images` bucket
+- **AND** markdown image syntax is inserted at cursor position
+
+#### Scenario: Image displayed in article
+- **WHEN** visitor views an article with images
+- **THEN** images are loaded from Supabase Storage and displayed inline

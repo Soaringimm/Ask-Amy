@@ -31,7 +31,23 @@ Benefits:
 - Built-in email notifications
 - Free tier sufficient for MVP
 
-Env var: `VITE_CAL_USERNAME`
+Env vars: `VITE_CAL_USERNAME`, `VITE_CAL_API_KEY`
+
+**Admin Booking List via Cal.com API:**
+```javascript
+// src/lib/calcom.js
+const API_URL = 'https://api.cal.com/v1';
+
+export async function getBookings() {
+  const response = await fetch(`${API_URL}/bookings?apiKey=${API_KEY}`);
+  return response.json();
+}
+```
+
+Admin Dashboard displays:
+- Booking date/time
+- Guest name & email
+- Status (upcoming/completed/cancelled)
 
 ### 2. Database Schema Changes
 
@@ -42,6 +58,21 @@ alter table public.articles add column excerpt text;
 alter table public.articles add column published_at timestamptz;
 -- Create index for slug lookup
 create index articles_slug_idx on public.articles(slug);
+```
+
+**Supabase Storage bucket: `article-images`**
+```sql
+-- Create bucket (via Supabase dashboard or SQL)
+insert into storage.buckets (id, name, public) values ('article-images', 'article-images', true);
+
+-- Public read policy
+create policy "Public read access" on storage.objects for select using (bucket_id = 'article-images');
+
+-- Admin upload policy
+create policy "Admin upload access" on storage.objects for insert with check (
+  bucket_id = 'article-images' and
+  exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role = 'admin')
+);
 ```
 
 No changes to `consultations` table (Cal.com handles booking data).
