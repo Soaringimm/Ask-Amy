@@ -13,10 +13,23 @@ CREATE TABLE aa_profiles (
 -- Enable RLS
 ALTER TABLE aa_profiles ENABLE ROW LEVEL SECURITY;
 
--- Policies
+-- Helper function to check admin status (avoids RLS recursion)
+CREATE OR REPLACE FUNCTION is_admin()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM aa_profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Policies (using is_admin() to avoid recursion)
 CREATE POLICY "Users can view own profile"
   ON aa_profiles FOR SELECT
-  USING (auth.uid() = id OR EXISTS (SELECT 1 FROM aa_profiles WHERE id = auth.uid() AND role = 'admin'));
+  USING (auth.uid() = id);
+
+CREATE POLICY "Admins can view all profiles"
+  ON aa_profiles FOR SELECT
+  USING (is_admin());
 
 CREATE POLICY "Users can insert own profile"
   ON aa_profiles FOR INSERT
@@ -28,7 +41,7 @@ CREATE POLICY "Users can update own profile"
 
 CREATE POLICY "Admins can update any profile"
   ON aa_profiles FOR UPDATE
-  USING (EXISTS (SELECT 1 FROM aa_profiles WHERE id = auth.uid() AND role = 'admin'));
+  USING (is_admin());
 
 -- Auto-create profile on user signup
 CREATE FUNCTION public.handle_new_user()
