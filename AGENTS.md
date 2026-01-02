@@ -16,3 +16,7 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+## Answer style
+- 不需要输出太多中间过程，尽可能简明而要
+## Temp files
+- all temp files should be in the project directory's tmp sub folder

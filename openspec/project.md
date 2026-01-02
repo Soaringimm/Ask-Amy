@@ -2,7 +2,7 @@
 
 ## Purpose
 **Ask Amy (Ask Amy 咨询平台)** is a consultancy platform built for knowledge monetization. It serves two main audiences:
-1.  **Clients:** Can browse a knowledge base of professional advice (likely immigration/IRCC related), make voluntary tips via WeChat/Alipay, and request personalized consultations without needing to register (Guest flow).
+1.  **Clients:** Can browse a knowledge base of professional advice (likely immigration/IRCC related), make voluntary tips via WeChat/Alipay, and request personalized consultations. Clients can register/login to track their requests and manage their profile, or (optionally) submit as guests.
 2.  **Admin (Amy):** A dashboard to manage consultation requests, provide quotes, update request status, and manage knowledge base articles.
 
 ## Tech Stack
@@ -45,8 +45,8 @@
 - **IRCC:** "Immigration, Refugees and Citizenship Canada" - likely the domain of expertise based on data files (`ircc-topics-list.json`).
 
 ## Important Constraints
-- **Authentication:** Admin-only login. Clients are unauthenticated (guests).
-- **Privacy:** RLS policies must strictly protect consultation data from public view.
+- **Authentication:** Dual authentication model (Admin & Client).
+- **Privacy:** RLS policies must strictly protect consultation data. Clients see only their own; Admins see all.
 - **Localization:** Current content is mix of Chinese (primary for UI/Docs) and potentially English (IRCC content). Future plan for multi-language.
 
 ## External Dependencies
