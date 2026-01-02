@@ -19,6 +19,18 @@ The system MUST provide consultation booking via embedded Cal.com calendar widge
 - **WHEN** admin logs into Cal.com dashboard (external)
 - **THEN** admin can set available hours, block dates, and manage bookings
 
+### Requirement: Admin Booking List
+Admin MUST be able to view all bookings in the Admin Dashboard.
+
+#### Scenario: Admin views booking list
+- **WHEN** admin navigates to `/admin/dashboard`
+- **THEN** a list of bookings is displayed from Cal.com API
+- **AND** each booking shows date/time, guest name, email, and status
+
+#### Scenario: Booking list refreshes
+- **WHEN** admin clicks refresh or revisits the dashboard
+- **THEN** the latest bookings are fetched from Cal.com API
+
 ## REMOVED Requirements
 
 ### Requirement: Free-form Deadline Input

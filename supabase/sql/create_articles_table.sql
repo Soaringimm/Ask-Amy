@@ -1,40 +1,33 @@
--- Create articles table if it doesn't exist
-create table if not exists public.articles (
-  id uuid default gen_random_uuid() primary key,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  title text not null,
-  content text not null,
-  author_id uuid references auth.users(id) on delete set null,
-  is_published boolean default false
+-- Create aa_articles table
+CREATE TABLE aa_articles (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL,
+  title text NOT NULL,
+  content text NOT NULL,
+  author_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  is_published boolean DEFAULT false,
+  slug text UNIQUE,
+  excerpt text,
+  published_at timestamptz
 );
 
 -- Enable RLS
-alter table public.articles enable row level security;
+ALTER TABLE aa_articles ENABLE ROW LEVEL SECURITY;
+
+-- Indexes
+CREATE INDEX aa_articles_slug_idx ON aa_articles(slug);
+CREATE INDEX aa_articles_published_idx ON aa_articles(published_at DESC) WHERE published_at IS NOT NULL;
 
 -- Policies
+CREATE POLICY "Anyone can view published articles"
+  ON aa_articles FOR SELECT
+  USING (published_at IS NOT NULL);
 
--- 1. Everyone can view published articles (for future public integration)
-create policy "Anyone can view published articles"
-  on public.articles for select
-  using (is_published = true);
+CREATE POLICY "Admins can view all articles"
+  ON aa_articles FOR SELECT
+  USING (EXISTS (SELECT 1 FROM aa_profiles WHERE aa_profiles.id = auth.uid() AND aa_profiles.role = 'admin'));
 
--- 2. Admins can view all articles
-create policy "Admins can view all articles"
-  on public.articles for select
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role = 'admin'
-    )
-  );
-
--- 3. Admins can insert/update/delete articles
-create policy "Admins can manage articles"
-  on public.articles for all
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role = 'admin'
-    )
-  );
+CREATE POLICY "Admins can manage articles"
+  ON aa_articles FOR ALL
+  USING (EXISTS (SELECT 1 FROM aa_profiles WHERE aa_profiles.id = auth.uid() AND aa_profiles.role = 'admin'));

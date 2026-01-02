@@ -1,17 +1,15 @@
-import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { FaSignOutAlt, FaComments, FaBook, FaUsers } from 'react-icons/fa';
-import { supabase } from '../lib/supabase'; // Assuming supabase client is exported from here
+import { NavLink, useNavigate } from 'react-router-dom'
+import { FaSignOutAlt, FaComments, FaBook } from 'react-icons/fa'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function AdminLayout({ children }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
+  const { signOut } = useAuth()
 
   const handleLogout = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-    navigate('/admin/login');
-  };
+    await signOut()
+    navigate('/admin/login')
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -43,27 +41,17 @@ export default function AdminLayout({ children }) {
                 }`
               }
             >
-              <FaComments className="mr-3" /> 咨询管理
+              <FaComments className="mr-3" /> 预约管理
             </NavLink>
             <NavLink
-              to="/admin/articles" // Assuming there will be an /admin/articles route
+              to="/admin/articles"
               className={({ isActive }) =>
                 `flex items-center p-3 rounded-lg text-lg font-medium transition ${
                   isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'
                 }`
               }
             >
-              <FaBook className="mr-3" /> 知识库管理
-            </NavLink>
-            <NavLink
-              to="/admin/users"
-              className={({ isActive }) =>
-                `flex items-center p-3 rounded-lg text-lg font-medium transition ${
-                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'
-                }`
-              }
-            >
-              <FaUsers className="mr-3" /> 用户管理
+              <FaBook className="mr-3" /> 文章管理
             </NavLink>
           </nav>
         </aside>
@@ -74,5 +62,5 @@ export default function AdminLayout({ children }) {
         </main>
       </div>
     </div>
-  );
+  )
 }

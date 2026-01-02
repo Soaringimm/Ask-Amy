@@ -1,112 +1,30 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
-import { FaCheckCircle } from 'react-icons/fa'
-import { useAuth } from '../contexts/AuthContext'
+import Cal, { getCalApi } from '@calcom/embed-react'
+import { useEffect } from 'react'
+import { getCalUsername } from '../lib/calcom'
 
 export default function ConsultationPage() {
-  const { user } = useAuth()
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    question: '',
-    deadline: '',
-  })
+  const calUsername = getCalUsername()
 
   useEffect(() => {
-    if (user && user.email) {
-      setFormData(prev => ({
-        ...prev,
-        email: user.email
-      }))
-    }
-  }, [user])
-
-  const [submitted, setSubmitted] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    })
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-
-    try {
-      // 检查 Supabase 是否已配置
-      if (!supabase) {
-        throw new Error('数据库未配置，请联系管理员')
-      }
-
-      const { error } = await supabase
-        .from('consultations')
-        .insert([
-          {
-            user_id: user ? user.id : null,
-            name: formData.name,
-            email: formData.email,
-            question: formData.question,
-            deadline: formData.deadline,
-            status: 'pending',
-          },
-        ])
-
-      if (error) throw error
-
-      setSubmitted(true)
-      setFormData({
-        name: '',
-        email: '',
-        question: '',
-        deadline: '',
+    (async function () {
+      const cal = await getCalApi()
+      cal('ui', {
+        theme: 'light',
+        styles: { branding: { brandColor: '#2563eb' } },
+        hideEventTypeDetails: false,
       })
-    } catch (error) {
-      console.error('Error submitting consultation:', error)
-      setError(error.message || '提交失败，请重试')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (submitted) {
-    return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="bg-white rounded-xl shadow-sm p-8 text-center">
-          <FaCheckCircle className="text-6xl text-green-500 mx-auto mb-4" />
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">
-            提交成功！
-          </h2>
-          <p className="text-gray-600 mb-6">
-            我们已收到您的咨询请求。我们会在24小时内审阅您的问题，并通过邮件发送报价。
-          </p>
-          <p className="text-gray-600 mb-8">
-            报价将包含咨询类型（书面回复或电话咨询）和费用，您可以根据报价决定是否继续。
-          </p>
-          <button
-            onClick={() => setSubmitted(false)}
-            className="bg-primary-600 text-white px-8 py-3 rounded-lg hover:bg-primary-700 transition"
-          >
-            提交另一个咨询
-          </button>
-        </div>
-      </div>
-    )
-  }
+    })()
+  }, [])
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* 页面标题 */}
       <div className="mb-8">
         <h1 className="text-4xl font-bold text-gray-900 mb-4">
-          个性化咨询
+          预约咨询
         </h1>
         <p className="text-gray-600">
-          提交您的问题，我们将为您提供专业的个性化解答
+          选择您方便的时间，预约专业咨询服务
         </p>
       </div>
 
@@ -114,106 +32,37 @@ export default function ConsultationPage() {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
         <h3 className="font-semibold text-blue-900 mb-2">咨询流程：</h3>
         <ol className="list-decimal list-inside space-y-2 text-blue-800">
-          <li>填写下方表单，详细描述您的问题</li>
-          <li>我们会在24小时内审阅并通过邮件发送报价</li>
-          <li>报价示例：书面回复 - $50 CAD / 电话咨询（约30分钟）- $150 CAD</li>
-          <li>您确认并支付后，我们将按时完成咨询</li>
+          <li>在下方日历中选择可用时间段</li>
+          <li>填写您的基本信息和咨询问题</li>
+          <li>确认预约后，您将收到确认邮件</li>
+          <li>咨询结束后通过微信/支付宝完成付款</li>
         </ol>
       </div>
 
-      {/* 咨询表单 */}
-      <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm p-8">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-            {error}
-          </div>
-        )}
-
-        <div className="space-y-6">
-          {/* 姓名 */}
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
-              您的姓名 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              id="name"
-              name="name"
-              required
-              value={formData.name}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              placeholder="请输入您的姓名"
-            />
-          </div>
-
-          {/* 邮箱 */}
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-              电子邮箱 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="email"
-              id="email"
-              name="email"
-              required
-              value={formData.email}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              placeholder="your@email.com"
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              我们将通过此邮箱向您发送报价和咨询结果
-            </p>
-          </div>
-
-          {/* 问题描述 */}
-          <div>
-            <label htmlFor="question" className="block text-sm font-medium text-gray-700 mb-2">
-              问题描述 <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              id="question"
-              name="question"
-              required
-              rows="6"
-              value={formData.question}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              placeholder="请详细描述您的问题，提供的信息越详细，我们的解答就越准确..."
-            />
-          </div>
-
-          {/* Deadline */}
-          <div>
-            <label htmlFor="deadline" className="block text-sm font-medium text-gray-700 mb-2">
-              期望完成时间 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              id="deadline"
-              name="deadline"
-              required
-              value={formData.deadline}
-              onChange={handleChange}
-              min={new Date().toISOString().split('T')[0]}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              我们会尽力在您期望的时间前完成咨询
-            </p>
-          </div>
-
-          {/* 提交按钮 */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-primary-600 text-white py-3 rounded-lg font-semibold hover:bg-primary-700 transition disabled:bg-gray-400"
-          >
-            {loading ? '提交中...' : '提交咨询请求'}
-          </button>
+      {/* Cal.com 嵌入 */}
+      {calUsername ? (
+        <div className="bg-white rounded-xl shadow-sm p-4">
+          <Cal
+            calLink={calUsername}
+            style={{ width: '100%', height: '100%', overflow: 'scroll' }}
+            config={{ layout: 'month_view' }}
+          />
         </div>
-      </form>
+      ) : (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+          <p className="text-yellow-800">
+            预约系统配置中，请稍后再试或直接联系我们。
+          </p>
+        </div>
+      )}
+
+      {/* 付款说明 */}
+      <div className="mt-8 bg-gray-50 border border-gray-200 rounded-lg p-6">
+        <h3 className="font-semibold text-gray-900 mb-2">付款方式：</h3>
+        <p className="text-gray-600">
+          咨询完成后，我们将通过邮件发送付款二维码（支持微信/支付宝）。
+        </p>
+      </div>
     </div>
   )
 }

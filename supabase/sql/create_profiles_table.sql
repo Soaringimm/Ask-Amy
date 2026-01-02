@@ -1,53 +1,45 @@
--- Create a table for public profiles
-create table profiles (
-  id uuid references auth.users on delete cascade primary key,
+-- Create aa_profiles table
+CREATE TABLE aa_profiles (
+  id uuid REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email text,
   display_name text,
   wechat_id text,
   avatar_url text,
-  role text default 'client' not null,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  role text DEFAULT 'client' NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
--- Set up Row Level Security (RLS)
-alter table profiles enable row level security;
+-- Enable RLS
+ALTER TABLE aa_profiles ENABLE ROW LEVEL SECURITY;
 
-create policy "Public profiles are viewable by owner and admin."
-  on profiles for select using (
-    auth.uid() = id OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+-- Policies
+CREATE POLICY "Users can view own profile"
+  ON aa_profiles FOR SELECT
+  USING (auth.uid() = id OR EXISTS (SELECT 1 FROM aa_profiles WHERE id = auth.uid() AND role = 'admin'));
 
-create policy "Users can insert their own profile."
-  on profiles for insert with check (auth.uid() = id);
+CREATE POLICY "Users can insert own profile"
+  ON aa_profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
 
-create policy "Users can update own profile."
-  on profiles for update using (auth.uid() = id);
+CREATE POLICY "Users can update own profile"
+  ON aa_profiles FOR UPDATE
+  USING (auth.uid() = id);
 
-create policy "Admins can update any profile."
-  on profiles for update using (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
+CREATE POLICY "Admins can update any profile"
+  ON aa_profiles FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM aa_profiles WHERE id = auth.uid() AND role = 'admin'));
 
--- Set up Realtime
--- alter publication supabase_realtime add table profiles;
+-- Auto-create profile on user signup
+CREATE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.aa_profiles (id, email)
+  VALUES (new.id, new.email);
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Create a function to automatically create a profile when a new user signs up
-create function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.profiles (id, email)
-  values (new.id, new.email);
-  return new;
-end;
-$$ language plpgsql security definer;
-
--- Trigger the function every time a user is created
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
-
--- Optional: Set default email for existing users if any, or leave null if only future users matter
--- update public.profiles set email = auth.users.email from auth.users where profiles.id = auth.users.id and profiles.email is null;
-
--- Ensure admin is created with 'admin' role if there's an existing admin user
--- This requires manual update for the existing admin, e.g.:
--- update public.profiles set role = 'admin' where id = '<admin_user_id>';
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
