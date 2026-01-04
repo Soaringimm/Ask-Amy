@@ -14,6 +14,7 @@ import {
   MarkdownRenderer,
   AuthorInfo,
 } from '../components/blog'
+import FavoriteButton from '../components/blog/FavoriteButton'
 
 export default function ArticleDetailPage() {
   const { slug } = useParams()
@@ -187,6 +188,7 @@ export default function ArticleDetailPage() {
                     />
 
                     <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <FavoriteButton articleId={article.id} size="md" showCount />
                       {article.view_count !== undefined && (
                         <span className="flex items-center gap-1">
                           <FaEye className="w-4 h-4" />

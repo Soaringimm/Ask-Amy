@@ -1,7 +1,33 @@
+import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { FaHome, FaBook, FaComments, FaNewspaper, FaSearch } from 'react-icons/fa'
+import { FaHome, FaComments, FaNewspaper, FaSearch, FaUser, FaSignOutAlt, FaHeart, FaCog } from 'react-icons/fa'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function MainLayout({ children }) {
+  const { user, profile, signOut, isAdmin } = useAuth()
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const menuRef = useRef(null)
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setShowUserMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleSignOut = async () => {
+    try {
+      await signOut()
+      setShowUserMenu(false)
+    } catch (err) {
+      console.error('Sign out error:', err)
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* 导航栏 */}
@@ -11,7 +37,7 @@ export default function MainLayout({ children }) {
             <Link to="/" className="text-2xl font-bold text-primary-600">
               Ask Amy
             </Link>
-            <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-4 md:space-x-6">
               <Link
                 to="/"
                 className="flex items-center space-x-1 text-gray-700 hover:text-primary-600 transition"
@@ -40,6 +66,92 @@ export default function MainLayout({ children }) {
                 <FaComments />
                 <span className="hidden md:inline">预约咨询</span>
               </Link>
+
+              {/* User Menu */}
+              {user ? (
+                <div className="relative" ref={menuRef}>
+                  <button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="flex items-center space-x-2 text-gray-700 hover:text-primary-600 transition"
+                  >
+                    {profile?.avatar_url ? (
+                      <img
+                        src={profile.avatar_url}
+                        alt="avatar"
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
+                        <FaUser className="text-primary-600 text-sm" />
+                      </div>
+                    )}
+                    <span className="hidden md:inline text-sm font-medium">
+                      {profile?.display_name || profile?.email?.split('@')[0] || '用户'}
+                    </span>
+                  </button>
+
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border py-1 z-50">
+                      <div className="px-4 py-2 border-b">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {profile?.display_name || '用户'}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {profile?.email || user.email}
+                        </p>
+                      </div>
+                      <Link
+                        to="/profile"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        <FaCog className="mr-2" />
+                        个人设置
+                      </Link>
+                      <Link
+                        to="/favorites"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        <FaHeart className="mr-2" />
+                        我的收藏
+                      </Link>
+                      {isAdmin && (
+                        <Link
+                          to="/admin/dashboard"
+                          onClick={() => setShowUserMenu(false)}
+                          className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          <FaCog className="mr-2" />
+                          管理后台
+                        </Link>
+                      )}
+                      <button
+                        onClick={handleSignOut}
+                        className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                      >
+                        <FaSignOutAlt className="mr-2" />
+                        退出登录
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <Link
+                    to="/login"
+                    className="text-gray-700 hover:text-primary-600 transition text-sm font-medium"
+                  >
+                    登录
+                  </Link>
+                  <Link
+                    to="/register"
+                    className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition"
+                  >
+                    注册
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         </div>

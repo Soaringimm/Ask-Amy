@@ -2,9 +2,11 @@ import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { FaEye, FaClock, FaStar } from 'react-icons/fa'
 import { TagList } from './Tag'
+import FavoriteButton from './FavoriteButton'
 
 export function ArticleCard({ article, featured = false }) {
   const {
+    id,
     title,
     slug,
     excerpt,
@@ -70,6 +72,7 @@ export function ArticleCard({ article, featured = false }) {
             {published_at && format(new Date(published_at), 'yyyy年MM月dd日')}
           </span>
           <div className="flex items-center gap-3">
+            {id && <FavoriteButton articleId={id} size="sm" />}
             {reading_time && (
               <span className="flex items-center gap-1">
                 <FaClock className="w-3 h-3" />

@@ -5,11 +5,19 @@ import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import ConsultationPage from './pages/ConsultationPage'
 import ArticlesPage from './pages/ArticlesPage'
 import ArticleDetailPage from './pages/ArticleDetailPage'
+import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
+import ProfilePage from './pages/ProfilePage'
+import FavoritesPage from './pages/FavoritesPage'
 import AdminLogin from './pages/AdminLogin'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminArticles from './pages/AdminArticles'
 import AdminComments from './pages/AdminComments'
+import AdminUsers from './pages/AdminUsers'
 import ProtectedRoute from './components/ProtectedRoute'
+import UserRoute from './components/UserRoute'
 
 function App() {
   return (
@@ -20,6 +28,30 @@ function App() {
       <Route path="/consultation" element={<MainLayout><ConsultationPage /></MainLayout>} />
       <Route path="/articles" element={<MainLayout><ArticlesPage /></MainLayout>} />
       <Route path="/articles/:slug" element={<MainLayout><ArticleDetailPage /></MainLayout>} />
+
+      {/* Auth Routes */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+
+      {/* User Protected Routes */}
+      <Route
+        path="/profile"
+        element={
+          <UserRoute>
+            <MainLayout><ProfilePage /></MainLayout>
+          </UserRoute>
+        }
+      />
+      <Route
+        path="/favorites"
+        element={
+          <UserRoute>
+            <MainLayout><FavoritesPage /></MainLayout>
+          </UserRoute>
+        }
+      />
 
       {/* Admin Routes */}
       <Route path="/admin/login" element={<AdminLogin />} />
@@ -44,6 +76,14 @@ function App() {
         element={
           <ProtectedRoute>
             <AdminComments />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={
+          <ProtectedRoute>
+            <AdminUsers />
           </ProtectedRoute>
         }
       />

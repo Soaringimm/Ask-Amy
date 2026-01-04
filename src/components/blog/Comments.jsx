@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { FaUser, FaReply, FaSpinner, FaCheck } from 'react-icons/fa'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../contexts/AuthContext'
 
 // Comment form component
 function CommentForm({ articleId, parentId = null, onSuccess, onCancel }) {
+  const { user, profile } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [content, setContent] = useState('')
@@ -12,28 +15,44 @@ function CommentForm({ articleId, parentId = null, onSuccess, onCancel }) {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
 
+  // Pre-fill for logged-in users
+  useEffect(() => {
+    if (user && profile) {
+      setName(profile.display_name || profile.email?.split('@')[0] || '')
+      setEmail(profile.email || user.email || '')
+    }
+  }, [user, profile])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
     try {
-      const { error: submitError } = await supabase.from('aa_comments').insert([
-        {
-          article_id: articleId,
-          parent_id: parentId,
-          author_name: name,
-          author_email: email,
-          content: content,
-        },
-      ])
+      const commentData = {
+        article_id: articleId,
+        parent_id: parentId,
+        author_name: name,
+        author_email: email,
+        content: content,
+      }
+
+      // Add user_id for logged-in users
+      if (user) {
+        commentData.user_id = user.id
+      }
+
+      const { error: submitError } = await supabase.from('aa_comments').insert([commentData])
 
       if (submitError) throw submitError
 
       setSuccess(true)
-      setName('')
-      setEmail('')
       setContent('')
+      // Only reset name/email for guests
+      if (!user) {
+        setName('')
+        setEmail('')
+      }
 
       setTimeout(() => {
         setSuccess(false)
@@ -64,33 +83,50 @@ function CommentForm({ articleId, parentId = null, onSuccess, onCancel }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            昵称 <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            placeholder="您的昵称"
-          />
+      {/* Show user info or guest input fields */}
+      {user ? (
+        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+          {profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover" />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
+              <FaUser className="text-primary-600" />
+            </div>
+          )}
+          <div>
+            <p className="font-medium text-gray-900">{profile?.display_name || profile?.email?.split('@')[0]}</p>
+            <p className="text-sm text-gray-500">以登录身份评论</p>
+          </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            邮箱（不公开）
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            placeholder="your@email.com"
-          />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              昵称 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              placeholder="您的昵称"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              邮箱（不公开）
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              placeholder="your@email.com"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -129,6 +165,12 @@ function CommentForm({ articleId, parentId = null, onSuccess, onCancel }) {
           >
             取消
           </button>
+        )}
+        {!user && !onCancel && (
+          <span className="text-sm text-gray-500">
+            <Link to="/login" className="text-primary-600 hover:text-primary-700">登录</Link>
+            {' '}后评论更方便
+          </span>
         )}
       </div>
     </form>
