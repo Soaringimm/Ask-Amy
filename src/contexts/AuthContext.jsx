@@ -29,12 +29,21 @@ export const AuthProvider = ({ children }) => {
       } catch (error) {
         // If timeout or other error, clear potentially corrupted session data and proceed
         console.error('Session initialization failed:', error.message)
-        const storageKey = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
-        if (storageKey) {
-          localStorage.removeItem(storageKey)
-          console.warn('Cleared corrupted session data, please refresh')
+
+        // Clear all Supabase auth related localStorage keys
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('sb-'))
+          .forEach(k => localStorage.removeItem(k))
+
+        // Force sign out to reset Supabase client internal state
+        try {
+          await supabase.auth.signOut({ scope: 'local' })
+        } catch {
+          // Ignore signOut errors during recovery
         }
+
         setUser(null)
+        setProfile(null)
       } finally {
         setLoading(false)
       }

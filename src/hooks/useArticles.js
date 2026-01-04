@@ -2,13 +2,21 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 
 const ARTICLES_PER_PAGE = 9
+const QUERY_TIMEOUT = 10000 // 10 seconds
+
+// Wrapper to add timeout to any promise
+function withTimeout(promise, ms = QUERY_TIMEOUT) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Query timeout')), ms)
+  )
+  return Promise.race([promise, timeout])
+}
 
 // Fetch all tags
 async function fetchTags() {
-  const { data, error } = await supabase
-    .from('aa_tags')
-    .select('*')
-    .order('name')
+  const { data, error } = await withTimeout(
+    supabase.from('aa_tags').select('*').order('name')
+  )
 
   if (error) throw error
   return data || []
@@ -16,6 +24,27 @@ async function fetchTags() {
 
 // Fetch articles with pagination, search, and tag filter
 async function fetchArticles({ page, tag, search }) {
+  // Apply tag filter first if needed
+  let articleIdFilter = null
+  if (tag) {
+    const { data: tagData } = await withTimeout(
+      supabase.from('aa_tags').select('id').eq('slug', tag).single()
+    )
+
+    if (tagData) {
+      const { data: articleIds } = await withTimeout(
+        supabase.from('aa_article_tags').select('article_id').eq('tag_id', tagData.id)
+      )
+
+      if (articleIds && articleIds.length > 0) {
+        articleIdFilter = articleIds.map((a) => a.article_id)
+      } else {
+        return { articles: [], totalCount: 0 }
+      }
+    }
+  }
+
+  // Build base query
   let query = supabase
     .from('aa_articles')
     .select(`
@@ -27,25 +56,8 @@ async function fetchArticles({ page, tag, search }) {
     .order('published_at', { ascending: false })
 
   // Apply tag filter
-  if (tag) {
-    const { data: tagData } = await supabase
-      .from('aa_tags')
-      .select('id')
-      .eq('slug', tag)
-      .single()
-
-    if (tagData) {
-      const { data: articleIds } = await supabase
-        .from('aa_article_tags')
-        .select('article_id')
-        .eq('tag_id', tagData.id)
-
-      if (articleIds && articleIds.length > 0) {
-        query = query.in('id', articleIds.map((a) => a.article_id))
-      } else {
-        return { articles: [], totalCount: 0 }
-      }
-    }
+  if (articleIdFilter) {
+    query = query.in('id', articleIdFilter)
   }
 
   // Apply search filter
@@ -53,15 +65,12 @@ async function fetchArticles({ page, tag, search }) {
     query = query.or(`title.ilike.%${search}%,excerpt.ilike.%${search}%,content.ilike.%${search}%`)
   }
 
-  // Get total count
-  const { count } = await query
-
   // Apply pagination
   const from = (page - 1) * ARTICLES_PER_PAGE
   const to = from + ARTICLES_PER_PAGE - 1
   query = query.range(from, to)
 
-  const { data, error } = await query
+  const { data, error, count } = await withTimeout(query)
 
   if (error) throw error
 
@@ -78,17 +87,19 @@ async function fetchArticles({ page, tag, search }) {
 
 // Fetch single article by slug
 async function fetchArticleBySlug(slug) {
-  const { data, error } = await supabase
-    .from('aa_articles')
-    .select(`
-      *,
-      aa_article_tags!left(
-        aa_tags(id, name, slug, color)
-      )
-    `)
-    .eq('slug', slug)
-    .not('published_at', 'is', null)
-    .single()
+  const { data, error } = await withTimeout(
+    supabase
+      .from('aa_articles')
+      .select(`
+        *,
+        aa_article_tags!left(
+          aa_tags(id, name, slug, color)
+        )
+      `)
+      .eq('slug', slug)
+      .not('published_at', 'is', null)
+      .single()
+  )
 
   if (error) {
     if (error.code === 'PGRST116') {
@@ -105,11 +116,13 @@ async function fetchArticleBySlug(slug) {
   // Fetch author info if available
   let author = null
   if (data.author_id) {
-    const { data: authorData } = await supabase
-      .from('aa_profiles')
-      .select('display_name, avatar_url')
-      .eq('id', data.author_id)
-      .single()
+    const { data: authorData } = await withTimeout(
+      supabase
+        .from('aa_profiles')
+        .select('display_name, avatar_url')
+        .eq('id', data.author_id)
+        .single()
+    )
 
     if (authorData) {
       author = authorData
