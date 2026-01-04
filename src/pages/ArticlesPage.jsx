@@ -1,127 +1,42 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
 import { FaBook, FaSearch, FaNewspaper } from 'react-icons/fa'
-import { HiSparkles } from 'react-icons/hi2'
 import {
   ArticleCard,
   FeaturedArticleCard,
   ArticleListSkeleton,
-  SearchBar,
   TagFilter,
   Pagination,
 } from '../components/blog'
+import { useTags, useArticles } from '../hooks/useArticles'
 
 const ARTICLES_PER_PAGE = 9
 
 export default function ArticlesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [articles, setArticles] = useState([])
-  const [tags, setTags] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [totalCount, setTotalCount] = useState(0)
+  const [localSearchValue, setLocalSearchValue] = useState('')
+  const isComposingRef = useRef(false)
 
   // URL params
   const currentPage = parseInt(searchParams.get('page') || '1', 10)
   const selectedTag = searchParams.get('tag') || null
   const searchQuery = searchParams.get('q') || ''
 
+  // Cached queries
+  const { data: tags = [] } = useTags()
+  const {
+    data: articlesData,
+    isLoading: loading,
+    error
+  } = useArticles({ page: currentPage, tag: selectedTag, search: searchQuery })
+
+  const articles = articlesData?.articles || []
+  const totalCount = articlesData?.totalCount || 0
+
+  // Sync local search value with URL param on mount
   useEffect(() => {
-    fetchTags()
-  }, [])
-
-  useEffect(() => {
-    fetchArticles()
-  }, [currentPage, selectedTag, searchQuery])
-
-  const fetchTags = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('aa_tags')
-        .select('*')
-        .order('name')
-
-      if (error) throw error
-      setTags(data || [])
-    } catch (err) {
-      console.error('Error fetching tags:', err)
-    }
-  }
-
-  const fetchArticles = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      let query = supabase
-        .from('aa_articles')
-        .select(`
-          id, title, slug, excerpt, published_at, cover_image,
-          reading_time, view_count, is_featured,
-          aa_article_tags!left(tag_id, aa_tags!inner(id, name, slug, color))
-        `, { count: 'exact' })
-        .not('published_at', 'is', null)
-        .order('published_at', { ascending: false })
-
-      // Apply tag filter
-      if (selectedTag) {
-        const { data: tagData } = await supabase
-          .from('aa_tags')
-          .select('id')
-          .eq('slug', selectedTag)
-          .single()
-
-        if (tagData) {
-          const { data: articleIds } = await supabase
-            .from('aa_article_tags')
-            .select('article_id')
-            .eq('tag_id', tagData.id)
-
-          if (articleIds && articleIds.length > 0) {
-            query = query.in('id', articleIds.map((a) => a.article_id))
-          } else {
-            setArticles([])
-            setTotalCount(0)
-            setLoading(false)
-            return
-          }
-        }
-      }
-
-      // Apply search filter
-      if (searchQuery) {
-        query = query.or(`title.ilike.%${searchQuery}%,excerpt.ilike.%${searchQuery}%,content.ilike.%${searchQuery}%`)
-      }
-
-      // Get total count
-      const { count } = await query
-
-      // Apply pagination
-      const from = (currentPage - 1) * ARTICLES_PER_PAGE
-      const to = from + ARTICLES_PER_PAGE - 1
-      query = query.range(from, to)
-
-      const { data, error } = await query
-
-      if (error) throw error
-
-      // Transform data to include tags array
-      const transformedData = (data || []).map((article) => ({
-        ...article,
-        tags: article.aa_article_tags
-          ?.map((at) => at.aa_tags)
-          .filter(Boolean) || [],
-      }))
-
-      setArticles(transformedData)
-      setTotalCount(count || 0)
-    } catch (err) {
-      console.error('Error fetching articles:', err)
-      setError('无法加载文章列表')
-    } finally {
-      setLoading(false)
-    }
-  }
+    setLocalSearchValue(searchQuery)
+  }, [searchQuery])
 
   // Separate featured article
   const featuredArticle = useMemo(() => {
@@ -140,7 +55,7 @@ export default function ArticlesPage() {
 
   const totalPages = Math.ceil(totalCount / ARTICLES_PER_PAGE)
 
-  const handleSearch = (value) => {
+  const updateSearchParams = (value) => {
     const params = new URLSearchParams(searchParams)
     if (value) {
       params.set('q', value)
@@ -149,6 +64,25 @@ export default function ArticlesPage() {
     }
     params.delete('page')
     setSearchParams(params)
+  }
+
+  const handleSearchChange = (e) => {
+    const value = e.target.value
+    setLocalSearchValue(value)
+    // Only update URL if not composing (for IME support)
+    if (!isComposingRef.current) {
+      updateSearchParams(value)
+    }
+  }
+
+  const handleCompositionStart = () => {
+    isComposingRef.current = true
+  }
+
+  const handleCompositionEnd = (e) => {
+    isComposingRef.current = false
+    // Update URL with final composed value
+    updateSearchParams(e.target.value)
   }
 
   const handleTagSelect = (tag) => {
@@ -206,8 +140,10 @@ export default function ArticlesPage() {
               <input
                 type="text"
                 placeholder="搜索文章标题或内容..."
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
+                value={localSearchValue}
+                onChange={handleSearchChange}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl shadow-soft focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-400 text-gray-900 placeholder-gray-400 transition-all duration-200"
               />
             </div>
@@ -243,7 +179,7 @@ export default function ArticlesPage() {
         {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6">
-            {error}
+            无法加载文章列表
           </div>
         )}
 

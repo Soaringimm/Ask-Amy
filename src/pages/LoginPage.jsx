@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { FaEye, FaEyeSlash, FaArrowRight } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
 import { useAuth } from '../contexts/AuthContext'
 
+const REMEMBER_EMAIL_KEY = 'askamy_remember_email'
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const navigate = useNavigate()
@@ -17,6 +20,15 @@ export default function LoginPage() {
   // Get redirect path from location state, default to home
   const from = location.state?.from?.pathname || '/'
 
+  // Load saved email on mount
+  useEffect(() => {
+    const savedEmail = localStorage.getItem(REMEMBER_EMAIL_KEY)
+    if (savedEmail) {
+      setEmail(savedEmail)
+      setRememberMe(true)
+    }
+  }, [])
+
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -24,6 +36,12 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password)
+      // Save or remove email based on remember me checkbox
+      if (rememberMe) {
+        localStorage.setItem(REMEMBER_EMAIL_KEY, email)
+      } else {
+        localStorage.removeItem(REMEMBER_EMAIL_KEY)
+      }
       navigate(from, { replace: true })
     } catch (err) {
       console.error('Login error:', err)
@@ -79,6 +97,8 @@ export default function LoginPage() {
               <input
                 type="email"
                 id="email"
+                name="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -95,6 +115,8 @@ export default function LoginPage() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   id="password"
+                  name="password"
+                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -111,7 +133,16 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm text-gray-600">记住账号</span>
+              </label>
               <Link
                 to="/forgot-password"
                 className="text-sm text-primary-600 hover:text-primary-700 font-medium link-underline"

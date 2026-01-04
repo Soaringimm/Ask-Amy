@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { FaArrowLeft, FaEye, FaClock } from 'react-icons/fa'
@@ -15,14 +15,15 @@ import {
   AuthorInfo,
 } from '../components/blog'
 import FavoriteButton from '../components/blog/FavoriteButton'
+import { useArticle } from '../hooks/useArticles'
 
 export default function ArticleDetailPage() {
   const { slug } = useParams()
-  const [article, setArticle] = useState(null)
-  const [tags, setTags] = useState([])
-  const [author, setAuthor] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const { data, isLoading: loading, error } = useArticle(slug)
+
+  const article = data?.article
+  const tags = data?.tags || []
+  const author = data?.author
 
   // Track view count
   const incrementViewCount = useCallback(async () => {
@@ -34,68 +35,10 @@ export default function ArticleDetailPage() {
   }, [slug])
 
   useEffect(() => {
-    fetchArticle()
-  }, [slug])
-
-  useEffect(() => {
     if (article) {
       incrementViewCount()
     }
   }, [article, incrementViewCount])
-
-  const fetchArticle = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      // Fetch article with tags
-      const { data, error: articleError } = await supabase
-        .from('aa_articles')
-        .select(`
-          *,
-          aa_article_tags!left(
-            aa_tags(id, name, slug, color)
-          )
-        `)
-        .eq('slug', slug)
-        .not('published_at', 'is', null)
-        .single()
-
-      if (articleError) {
-        if (articleError.code === 'PGRST116') {
-          setError('文章不存在')
-        } else {
-          throw articleError
-        }
-        return
-      }
-
-      setArticle(data)
-
-      // Extract tags
-      const articleTags = data.aa_article_tags
-        ?.map((at) => at.aa_tags)
-        .filter(Boolean) || []
-      setTags(articleTags)
-
-      // Fetch author info if available
-      if (data.author_id) {
-        const { data: authorData } = await supabase
-          .from('aa_profiles')
-          .select('display_name, avatar_url')
-          .eq('id', data.author_id)
-          .single()
-
-        if (authorData) {
-          setAuthor(authorData)
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching article:', err)
-      setError('无法加载文章')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   // Get current URL for sharing
   const currentUrl = typeof window !== 'undefined' ? window.location.href : ''
@@ -117,7 +60,7 @@ export default function ArticleDetailPage() {
     )
   }
 
-  if (error) {
+  if (error || !article) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Link
@@ -128,7 +71,7 @@ export default function ArticleDetailPage() {
           返回文章列表
         </Link>
         <div className="bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-lg">
-          {error}
+          {error?.message || '文章不存在'}
         </div>
       </div>
     )

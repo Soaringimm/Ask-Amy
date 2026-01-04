@@ -1,63 +1,51 @@
-import { useState, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { FaSearch, FaHeart, FaArrowLeft, FaSpinner, FaGlobeAmericas, FaQuestionCircle } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
-import { searchQuestions, getQuestionDetail } from '../lib/ircc'
+import { useIRCCSearch, useIRCCDetail } from '../hooks/useIRCC'
 
 export default function KnowledgeBasePage() {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
-  const [currentLang, setCurrentLang] = useState('zh')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [hasSearched, setHasSearched] = useState(false)
-
+  const [searchTerm, setSearchTerm] = useState('')
   const [selectedQuestionId, setSelectedQuestionId] = useState(null)
-  const [questionDetail, setQuestionDetail] = useState(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const isComposingRef = useRef(false)
 
-  const handleSearch = async (e) => {
+  // Cached queries
+  const {
+    data: searchData,
+    isLoading: loading,
+    error: searchError,
+    isFetched: hasSearched
+  } = useIRCCSearch(searchTerm)
+
+  const results = searchData?.results || []
+  const currentLang = searchData?.lang || 'zh'
+
+  const {
+    data: questionDetail,
+    isLoading: detailLoading,
+    error: detailError
+  } = useIRCCDetail(selectedQuestionId, currentLang)
+
+  const error = searchError || detailError
+
+  const handleSearch = (e) => {
     e?.preventDefault()
-
     if (!query.trim()) return
-
-    setLoading(true)
-    setError(null)
-    setHasSearched(true)
-
-    try {
-      const { results: data, lang } = await searchQuestions(query)
-      setResults(data)
-      setCurrentLang(lang)
-    } catch {
-      setError('搜索失败，请重试。')
-    } finally {
-      setLoading(false)
-    }
+    setSearchTerm(query.trim())
   }
 
-  // Fetch detail when a question is selected
-  useEffect(() => {
-    async function loadDetail() {
-      if (!selectedQuestionId) {
-        setQuestionDetail(null)
-        return
-      }
+  const handleInputChange = (e) => {
+    setQuery(e.target.value)
+  }
 
-      setDetailLoading(true)
-      try {
-        const data = await getQuestionDetail(selectedQuestionId, currentLang)
-        setQuestionDetail(data)
-      } catch {
-        setError('加载详情失败。')
-      } finally {
-        setDetailLoading(false)
-      }
-    }
+  const handleCompositionStart = () => {
+    isComposingRef.current = true
+  }
 
-    loadDetail()
-  }, [selectedQuestionId, currentLang])
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false
+  }
 
   const handleDonate = () => {
     setShowPaymentModal(true)
@@ -65,7 +53,6 @@ export default function KnowledgeBasePage() {
 
   const handleBack = () => {
     setSelectedQuestionId(null)
-    setQuestionDetail(null)
   }
 
   return (
@@ -99,7 +86,9 @@ export default function KnowledgeBasePage() {
                 type="text"
                 placeholder="输入中文或英文关键词..."
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={handleInputChange}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 className="w-full pl-12 pr-32 py-4 bg-white border border-gray-200 rounded-2xl shadow-soft focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-400 text-gray-900 placeholder-gray-400 transition-all duration-200"
               />
               <div className="absolute inset-y-0 right-2 flex items-center">
@@ -203,7 +192,7 @@ export default function KnowledgeBasePage() {
             {/* Error State */}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-                <p className="text-red-700">{error}</p>
+                <p className="text-red-700">搜索失败，请重试。</p>
               </div>
             )}
 
@@ -246,7 +235,7 @@ export default function KnowledgeBasePage() {
             )}
 
             {/* Empty State */}
-            {!loading && !error && results.length === 0 && hasSearched && (
+            {!loading && !error && results.length === 0 && hasSearched && searchTerm && (
               <div className="text-center py-16 card">
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
                   <FaSearch className="h-8 w-8 text-gray-400" />
@@ -257,7 +246,7 @@ export default function KnowledgeBasePage() {
             )}
 
             {/* Initial State */}
-            {!loading && !error && !hasSearched && (
+            {!loading && !error && !searchTerm && (
               <div className="text-center py-16">
                 <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-100 to-accent-100 mb-6">
                   <HiSparkles className="h-10 w-10 text-primary-500" />
