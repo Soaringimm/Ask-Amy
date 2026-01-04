@@ -1,12 +1,8 @@
-// Help Centre API Client
-// Dev: http://localhost:3104/api/v1/help-centre
-// Prod: https://es_search.jackyzhang.app/api/v1/help-centre
+const API_URL = import.meta.env.DEV ? '/api' : import.meta.env.VITE_IRCC_API_URL
+const API_KEY = import.meta.env.VITE_IRCC_API_KEY
 
-const API_BASE = import.meta.env.VITE_HELP_CENTRE_URL
-const API_TOKEN = import.meta.env.VITE_HELP_CENTRE_TOKEN
-
-if (!API_BASE || !API_TOKEN) {
-  console.warn('Help Centre API not configured: VITE_HELP_CENTRE_URL and VITE_HELP_CENTRE_TOKEN are required')
+if (!API_URL || !API_KEY) {
+  console.warn('IRCC API not configured: VITE_IRCC_API_URL and VITE_IRCC_API_KEY are required')
 }
 
 /**
@@ -32,30 +28,30 @@ export async function searchQuestions(query, limit = 10) {
   const lang = detectLanguage(query)
 
   try {
-    const response = await fetch(`${API_BASE}/help-centre/search`, {
-      method: 'POST',
+    const url = new URL(`${API_URL}/search`, window.location.origin)
+    url.searchParams.append('q', query)
+    url.searchParams.append('limit', limit)
+    url.searchParams.append('lang', lang)
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
       headers: {
-        'Authorization': `Bearer ${API_TOKEN}`,
+        'X-API-Key': API_KEY,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        query,
-        lang,
-        top_k: limit,
-      }),
     })
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new Error('Unauthorized: Invalid token. Please check VITE_HELP_CENTRE_TOKEN.')
+        throw new Error('Unauthorized: Invalid API Key. Please check VITE_IRCC_API_KEY.')
       }
       throw new Error(`Search failed: ${response.status} ${response.statusText}`)
     }
 
     const data = await response.json()
-    return { results: data.results || [], lang: data.lang || lang }
+    return { results: data.results, lang: data.lang || lang }
   } catch (error) {
-    console.error('Help Centre Search Error:', error)
+    console.error('IRCC Search Error:', error)
     throw error
   }
 }
@@ -68,11 +64,15 @@ export async function searchQuestions(query, limit = 10) {
  */
 export async function getQuestionDetail(qnum, lang = 'zh') {
   try {
-    const params = new URLSearchParams({ lang, format: 'html' })
-    const response = await fetch(`${API_BASE}/help-centre/detail/${qnum}?${params}`, {
+    const url = new URL(`${API_URL}/question/${qnum}`, window.location.origin)
+    url.searchParams.append('lang', lang)
+    url.searchParams.append('format', 'html')
+
+    const response = await fetch(url.toString(), {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${API_TOKEN}`,
+        'X-API-Key': API_KEY,
+        'Content-Type': 'application/json',
       },
     })
 
@@ -85,7 +85,7 @@ export async function getQuestionDetail(qnum, lang = 'zh') {
 
     return await response.json()
   } catch (error) {
-    console.error('Help Centre Detail Error:', error)
+    console.error('IRCC Detail Error:', error)
     throw error
   }
 }
