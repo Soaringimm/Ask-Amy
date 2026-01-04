@@ -10,15 +10,34 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession()
-      if (error) {
-        console.error('Error getting session:', error)
+      try {
+        // Add timeout to prevent hanging when localStorage has corrupted session data
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session initialization timeout')), 5000)
+        )
+        const sessionPromise = supabase.auth.getSession()
+
+        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise])
+
+        if (error) {
+          console.error('Error getting session:', error)
+        }
+        setUser(session?.user || null)
+        if (session?.user) {
+          await getProfile(session.user.id)
+        }
+      } catch (error) {
+        // If timeout or other error, clear potentially corrupted session data and proceed
+        console.error('Session initialization failed:', error.message)
+        const storageKey = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+        if (storageKey) {
+          localStorage.removeItem(storageKey)
+          console.warn('Cleared corrupted session data, please refresh')
+        }
+        setUser(null)
+      } finally {
+        setLoading(false)
       }
-      setUser(session?.user || null)
-      if (session?.user) {
-        await getProfile(session.user.id)
-      }
-      setLoading(false)
     }
 
     getSession()
