@@ -40,47 +40,47 @@ export default function AdminLayout({ children }) {
 
       <div className="flex-1 flex flex-row max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Sidebar Navigation */}
-        <aside className="w-60 bg-white shadow-md rounded-lg p-4 mr-8">
-          <nav className="flex flex-col space-y-4">
+        <aside className="w-48 flex-shrink-0 bg-white shadow-sm rounded-xl p-4 mr-6 h-fit">
+          <nav className="flex flex-col space-y-1">
             <NavLink
               to="/admin/dashboard"
               className={({ isActive }) =>
-                `flex items-center p-3 rounded-lg text-lg font-medium transition ${
-                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'
+                `flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`
               }
             >
-              <FaCalendarAlt className="mr-3" /> 预约管理
+              <FaCalendarAlt className="mr-2.5 flex-shrink-0" /> 预约管理
             </NavLink>
             <NavLink
               to="/admin/articles"
               className={({ isActive }) =>
-                `flex items-center p-3 rounded-lg text-lg font-medium transition ${
-                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'
+                `flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`
               }
             >
-              <FaBook className="mr-3" /> 文章管理
+              <FaBook className="mr-2.5 flex-shrink-0" /> 文章管理
             </NavLink>
             <NavLink
               to="/admin/comments"
               className={({ isActive }) =>
-                `flex items-center p-3 rounded-lg text-lg font-medium transition ${
-                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'
+                `flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`
               }
             >
-              <FaComments className="mr-3" /> 评论管理
+              <FaComments className="mr-2.5 flex-shrink-0" /> 评论管理
             </NavLink>
             <NavLink
               to="/admin/users"
               className={({ isActive }) =>
-                `flex items-center p-3 rounded-lg text-lg font-medium transition ${
-                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'
+                `flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`
               }
             >
-              <FaUsers className="mr-3" /> 用户管理
+              <FaUsers className="mr-2.5 flex-shrink-0" /> 用户管理
             </NavLink>
           </nav>
         </aside>
