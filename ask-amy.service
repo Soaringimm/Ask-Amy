@@ -1,0 +1,37 @@
+[Unit]
+Description=Ask Amy Frontend Application
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/jacky/apps/Ask-Amy
+User=jacky
+Group=jacky
+
+# Environment
+Environment="COMPOSE_FILE=docker-compose.prod.yml"
+
+# Start command
+ExecStart=/usr/bin/docker compose -f ${COMPOSE_FILE} up -d
+
+# Stop command
+ExecStop=/usr/bin/docker compose -f ${COMPOSE_FILE} down
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ask-amy
+
+[Install]
+WantedBy=multi-user.target
