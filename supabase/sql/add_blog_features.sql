@@ -32,7 +32,8 @@ CREATE POLICY "Anyone can view tags"
 
 CREATE POLICY "Admins can manage tags"
   ON aa_tags FOR ALL
-  USING (is_admin());
+  USING (is_admin())
+  WITH CHECK (is_admin());
 
 -- Article-tags policies
 CREATE POLICY "Anyone can view article tags"
@@ -41,7 +42,8 @@ CREATE POLICY "Anyone can view article tags"
 
 CREATE POLICY "Admins can manage article tags"
   ON aa_article_tags FOR ALL
-  USING (is_admin());
+  USING (is_admin())
+  WITH CHECK (is_admin());
 
 -- Index for faster tag lookups
 CREATE INDEX IF NOT EXISTS aa_tags_slug_idx ON aa_tags(slug);
@@ -109,7 +111,8 @@ CREATE POLICY "Anyone can create comments"
 
 CREATE POLICY "Admins can manage comments"
   ON aa_comments FOR ALL
-  USING (is_admin());
+  USING (is_admin())
+  WITH CHECK (is_admin());
 
 -- Indexes for comments
 CREATE INDEX IF NOT EXISTS aa_comments_article_idx ON aa_comments(article_id);

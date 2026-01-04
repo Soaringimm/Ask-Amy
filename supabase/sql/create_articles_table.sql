@@ -30,4 +30,5 @@ CREATE POLICY "Admins can view all articles"
 
 CREATE POLICY "Admins can manage articles"
   ON aa_articles FOR ALL
-  USING (is_admin());
+  USING (is_admin())
+  WITH CHECK (is_admin());

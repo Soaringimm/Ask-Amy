@@ -37,11 +37,13 @@ CREATE POLICY "Users can insert own profile"
 
 CREATE POLICY "Users can update own profile"
   ON aa_profiles FOR UPDATE
-  USING (auth.uid() = id);
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
 
 CREATE POLICY "Admins can update any profile"
   ON aa_profiles FOR UPDATE
-  USING (is_admin());
+  USING (is_admin())
+  WITH CHECK (is_admin());
 
 -- Auto-create profile on user signup
 CREATE FUNCTION public.handle_new_user()
