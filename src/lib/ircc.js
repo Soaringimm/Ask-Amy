@@ -1,9 +1,6 @@
-const API_URL = import.meta.env.DEV ? '/api' : import.meta.env.VITE_IRCC_API_URL
-const API_KEY = import.meta.env.VITE_IRCC_API_KEY
-
-if (!API_URL || !API_KEY) {
-  console.warn('IRCC API not configured: VITE_IRCC_API_URL and VITE_IRCC_API_KEY are required')
-}
+// DEV: vite proxy adds token; PROD: nginx proxy adds token
+const API_URL = '/api/help-centre'
+const API_TOKEN = import.meta.env.VITE_SEARCH_SERVICE_TOKEN
 
 /**
  * Detect if text contains Chinese characters.
@@ -19,10 +16,10 @@ export function detectLanguage(text) {
  * Search for questions in the IRCC Help Centre.
  * Auto-detects language from query.
  * @param {string} query - The search keyword.
- * @param {number} limit - Max results (default 10).
+ * @param {number} topK - Max results (default 10).
  * @returns {Promise<{results: Array, lang: string}>} - List of questions and detected language.
  */
-export async function searchQuestions(query, limit = 10) {
+export async function searchQuestions(query, topK = 10) {
   if (!query) return { results: [], lang: 'zh' }
 
   const lang = detectLanguage(query)
@@ -30,21 +27,16 @@ export async function searchQuestions(query, limit = 10) {
   try {
     const url = new URL(`${API_URL}/search`, window.location.origin)
     url.searchParams.append('q', query)
-    url.searchParams.append('limit', limit)
+    url.searchParams.append('top_k', topK)
     url.searchParams.append('lang', lang)
 
     const response = await fetch(url.toString(), {
-      method: 'GET',
       headers: {
-        'X-API-Key': API_KEY,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_TOKEN}`,
       },
     })
 
     if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Unauthorized: Invalid API Key. Please check VITE_IRCC_API_KEY.')
-      }
       throw new Error(`Search failed: ${response.status} ${response.statusText}`)
     }
 
@@ -64,15 +56,13 @@ export async function searchQuestions(query, limit = 10) {
  */
 export async function getQuestionDetail(qnum, lang = 'zh') {
   try {
-    const url = new URL(`${API_URL}/question/${qnum}`, window.location.origin)
+    const url = new URL(`${API_URL}/detail/${qnum}`, window.location.origin)
     url.searchParams.append('lang', lang)
     url.searchParams.append('format', 'html')
 
     const response = await fetch(url.toString(), {
-      method: 'GET',
       headers: {
-        'X-API-Key': API_KEY,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_TOKEN}`,
       },
     })
 

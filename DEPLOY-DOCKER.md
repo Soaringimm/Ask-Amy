@@ -63,10 +63,7 @@ services:
     networks:
       - shared-network
     environment:
-      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
-      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
-      - VITE_IRCC_API_URL=${VITE_IRCC_API_URL}
-      - VITE_IRCC_API_KEY=${VITE_IRCC_API_KEY}
+      - SEARCH_SERVICE_TOKEN=${SEARCH_SERVICE_TOKEN}
 
 networks:
   shared-network:

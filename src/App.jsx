@@ -8,6 +8,7 @@ import ArticleDetailPage from './pages/ArticleDetailPage'
 import AdminLogin from './pages/AdminLogin'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminArticles from './pages/AdminArticles'
+import AdminComments from './pages/AdminComments'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -35,6 +36,14 @@ function App() {
         element={
           <ProtectedRoute>
             <AdminArticles />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/comments"
+        element={
+          <ProtectedRoute>
+            <AdminComments />
           </ProtectedRoute>
         }
       />
