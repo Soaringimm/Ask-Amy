@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext(null)
@@ -7,63 +7,56 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const initTimeoutRef = useRef(null)
+  const initializedRef = useRef(false)
 
   useEffect(() => {
-    const getSession = async () => {
-      try {
-        // Add timeout to prevent hanging when localStorage has corrupted session data
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Session initialization timeout')), 5000)
-        )
-        const sessionPromise = supabase.auth.getSession()
-
-        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise])
-
-        if (error) {
-          console.error('Error getting session:', error)
-        }
-        setUser(session?.user || null)
-        if (session?.user) {
-          await getProfile(session.user.id)
-        }
-      } catch (error) {
-        // If timeout or other error, clear potentially corrupted session data and proceed
-        console.error('Session initialization failed:', error.message)
-
-        // Clear all Supabase auth related localStorage keys
-        Object.keys(localStorage)
-          .filter(k => k.startsWith('sb-'))
-          .forEach(k => localStorage.removeItem(k))
-
-        // Force sign out to reset Supabase client internal state
-        try {
-          await supabase.auth.signOut({ scope: 'local' })
-        } catch {
-          // Ignore signOut errors during recovery
-        }
-
-        setUser(null)
-        setProfile(null)
-      } finally {
+    // Safety timeout: if initialization takes too long, proceed without auth
+    // This prevents the app from being stuck in loading state
+    initTimeoutRef.current = setTimeout(() => {
+      if (!initializedRef.current) {
+        console.warn('Auth initialization timeout - proceeding without session')
+        initializedRef.current = true
         setLoading(false)
       }
-    }
+    }, 10000) // 10 second safety net
 
-    getSession()
-
+    // Use onAuthStateChange as the single source of truth for auth state
+    // INITIAL_SESSION event fires on mount with current session (or null)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setUser(session?.user || null)
-        if (session?.user) {
-          await getProfile(session.user.id)
-        } else {
+      async (event, session) => {
+        // Clear the safety timeout on first auth event
+        if (initTimeoutRef.current) {
+          clearTimeout(initTimeoutRef.current)
+          initTimeoutRef.current = null
+        }
+
+        // Handle different auth events
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          setUser(session?.user || null)
+          if (session?.user) {
+            // Defer profile fetch to avoid blocking
+            getProfile(session.user.id).catch(console.error)
+          } else {
+            setProfile(null)
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null)
           setProfile(null)
         }
-        setLoading(false)
+
+        // Mark as initialized after first event
+        if (!initializedRef.current) {
+          initializedRef.current = true
+          setLoading(false)
+        }
       }
     )
 
     return () => {
+      if (initTimeoutRef.current) {
+        clearTimeout(initTimeoutRef.current)
+      }
       subscription?.unsubscribe()
     }
   }, [])
