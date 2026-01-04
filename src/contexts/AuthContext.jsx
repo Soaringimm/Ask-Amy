@@ -190,7 +190,8 @@ export const AuthProvider = ({ children }) => {
     isAdmin: profile?.role === 'admin',
   }
 
-  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>
+  // Don't block rendering - let app load immediately, auth state will update async
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => {

@@ -11,23 +11,34 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // This prevents the client from attempting to refresh expired tokens which can hang
 const clearExpiredSession = () => {
   try {
-    const storageKey = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`
-    const stored = localStorage.getItem(storageKey)
-    if (!stored) return
+    // Find all Supabase auth tokens (works for both hosted and self-hosted)
+    const authKeys = Object.keys(localStorage).filter(
+      k => k.startsWith('sb-') && k.endsWith('-auth-token')
+    )
 
-    const session = JSON.parse(stored)
-    const expiresAt = session?.expires_at
+    for (const key of authKeys) {
+      const stored = localStorage.getItem(key)
+      if (!stored) continue
 
-    if (expiresAt) {
-      // Add 60 second buffer - if token expires within 60 seconds, clear it
-      const isExpired = Date.now() / 1000 > expiresAt - 60
-      if (isExpired) {
-        console.log('Clearing expired session data to prevent initialization hang')
-        localStorage.removeItem(storageKey)
+      try {
+        const session = JSON.parse(stored)
+        const expiresAt = session?.expires_at
+
+        if (expiresAt) {
+          // Add 60 second buffer - if token expires within 60 seconds, clear it
+          const isExpired = Date.now() / 1000 > expiresAt - 60
+          if (isExpired) {
+            console.log('Clearing expired session:', key)
+            localStorage.removeItem(key)
+          }
+        }
+      } catch {
+        // Corrupted data, remove it
+        localStorage.removeItem(key)
       }
     }
   } catch {
-    // If parsing fails, clear potentially corrupted data
+    // Fallback: clear all Supabase auth data
     Object.keys(localStorage)
       .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
       .forEach(k => localStorage.removeItem(k))
