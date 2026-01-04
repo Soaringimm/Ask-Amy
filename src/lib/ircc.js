@@ -48,8 +48,8 @@ export async function searchQuestions(query, limit = 10) {
       throw new Error(`Search failed: ${response.status} ${response.statusText}`)
     }
 
-    const results = await response.json()
-    return { results, lang }
+    const data = await response.json()
+    return { results: data.results, lang: data.lang || lang }
   } catch (error) {
     console.error('IRCC Search Error:', error)
     throw error
