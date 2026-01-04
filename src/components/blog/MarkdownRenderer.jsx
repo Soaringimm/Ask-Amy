@@ -7,7 +7,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { FaCopy, FaCheck, FaLink } from 'react-icons/fa'
 import { useState } from 'react'
 
-// Code block with copy button
+// Refined code block with elegant styling
 function CodeBlock({ language, children }) {
   const [copied, setCopied] = useState(false)
 
@@ -22,37 +22,60 @@ function CodeBlock({ language, children }) {
   }
 
   return (
-    <div className="relative group my-6">
-      {/* Language label */}
-      {language && (
-        <div className="absolute top-0 left-4 px-2 py-1 bg-gray-700 text-gray-300 text-xs rounded-b font-mono">
-          {language}
+    <div className="relative group my-8">
+      {/* Elegant container with subtle border */}
+      <div className="rounded-2xl overflow-hidden bg-slate-900 shadow-lg">
+        {/* Header bar */}
+        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/50 border-b border-slate-700/50">
+          {/* Window dots */}
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-red-500" />
+              <span className="w-3 h-3 rounded-full bg-yellow-500" />
+              <span className="w-3 h-3 rounded-full bg-green-500" />
+            </div>
+            {language && (
+              <span className="ml-3 text-xs font-medium tracking-wide uppercase text-slate-400">
+                {language}
+              </span>
+            )}
+          </div>
+          {/* Copy button */}
+          <button
+            onClick={handleCopy}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-200 ${
+              copied ? 'text-green-400 bg-green-400/10' : 'text-slate-400 hover:text-slate-300'
+            }`}
+            title="复制代码"
+          >
+            {copied ? (
+              <>
+                <FaCheck className="w-3 h-3" />
+                已复制
+              </>
+            ) : (
+              <>
+                <FaCopy className="w-3 h-3" />
+                复制
+              </>
+            )}
+          </button>
         </div>
-      )}
-      {/* Copy button */}
-      <button
-        onClick={handleCopy}
-        className="absolute top-2 right-2 p-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors opacity-0 group-hover:opacity-100"
-        title="复制代码"
-      >
-        {copied ? (
-          <FaCheck className="w-4 h-4 text-green-400" />
-        ) : (
-          <FaCopy className="w-4 h-4" />
-        )}
-      </button>
-      <SyntaxHighlighter
-        language={language || 'text'}
-        style={oneDark}
-        customStyle={{
-          margin: 0,
-          borderRadius: '0.75rem',
-          padding: '1.5rem',
-          paddingTop: language ? '2.5rem' : '1.5rem',
-        }}
-      >
-        {children}
-      </SyntaxHighlighter>
+        {/* Code content */}
+        <SyntaxHighlighter
+          language={language || 'text'}
+          style={oneDark}
+          customStyle={{
+            margin: 0,
+            padding: '1.25rem 1.5rem',
+            background: 'transparent',
+            fontSize: '0.875rem',
+            lineHeight: '1.7',
+          }}
+        >
+          {children}
+        </SyntaxHighlighter>
+      </div>
     </div>
   )
 }
@@ -69,10 +92,10 @@ const components = {
       return <CodeBlock language={language}>{codeString}</CodeBlock>
     }
 
-    // Inline code
+    // Inline code with refined styling
     return (
       <code
-        className="px-1.5 py-0.5 bg-gray-100 text-primary-700 rounded text-sm font-mono"
+        className="px-2 py-1 rounded-lg text-sm font-mono bg-primary-50 text-primary-600"
         {...props}
       >
         {children}
@@ -80,58 +103,50 @@ const components = {
     )
   },
 
-  // Headings with anchor links
+  // Headings with design system colors
+  // Note: [&_a] selector ensures heading links inherit heading color instead of link color
   h1: ({ children, ...props }) => (
     <h1
-      className="text-3xl font-bold text-gray-900 mt-10 mb-4 pb-2 border-b group"
+      className="font-display text-3xl md:text-4xl font-bold text-gray-900 mt-12 mb-6 pb-4 border-b border-gray-200 [&_a]:text-inherit [&_a]:no-underline [&_a:hover]:text-gray-700"
       {...props}
     >
       {children}
-      <a href={`#${props.id}`} className="ml-2 opacity-0 group-hover:opacity-100 text-primary-500">
-        <FaLink className="inline w-4 h-4" />
-      </a>
     </h1>
   ),
   h2: ({ children, ...props }) => (
     <h2
-      className="text-2xl font-bold text-gray-900 mt-8 mb-4 group"
+      className="font-display text-2xl md:text-[1.75rem] font-bold text-gray-800 mt-12 mb-6 [&_a]:text-inherit [&_a]:no-underline [&_a:hover]:text-gray-600"
       {...props}
     >
       {children}
-      <a href={`#${props.id}`} className="ml-2 opacity-0 group-hover:opacity-100 text-primary-500">
-        <FaLink className="inline w-4 h-4" />
-      </a>
     </h2>
   ),
   h3: ({ children, ...props }) => (
     <h3
-      className="text-xl font-semibold text-gray-900 mt-6 mb-3 group"
+      className="font-display text-xl md:text-[1.375rem] font-semibold text-gray-700 mt-8 mb-4 [&_a]:text-inherit [&_a]:no-underline [&_a:hover]:text-gray-500"
       {...props}
     >
       {children}
-      <a href={`#${props.id}`} className="ml-2 opacity-0 group-hover:opacity-100 text-primary-500">
-        <FaLink className="inline w-3 h-3" />
-      </a>
     </h3>
   ),
   h4: ({ children, ...props }) => (
-    <h4 className="text-lg font-semibold text-gray-900 mt-5 mb-2" {...props}>
+    <h4 className="font-display text-lg font-semibold text-gray-600 mt-6 mb-3 [&_a]:text-inherit [&_a]:no-underline [&_a:hover]:text-gray-500" {...props}>
       {children}
     </h4>
   ),
 
-  // Paragraphs
+  // Paragraphs with better typography
   p: ({ children, ...props }) => (
-    <p className="text-gray-700 leading-relaxed mb-4" {...props}>
+    <p className="text-gray-600 leading-[1.85] mb-5 text-[17px]" {...props}>
       {children}
     </p>
   ),
 
-  // Links
+  // Links with design system styling
   a: ({ children, href, ...props }) => (
     <a
       href={href}
-      className="text-primary-600 hover:text-primary-700 underline underline-offset-2"
+      className="font-medium text-primary-600 hover:text-primary-700 transition-colors duration-200 no-underline"
       target={href?.startsWith('http') ? '_blank' : undefined}
       rel={href?.startsWith('http') ? 'noopener noreferrer' : undefined}
       {...props}
@@ -140,88 +155,111 @@ const components = {
     </a>
   ),
 
-  // Images
-  img: ({ alt, src, ...props }) => (
-    <figure className="my-6">
-      <img
-        src={src}
-        alt={alt}
-        className="rounded-xl max-w-full h-auto mx-auto shadow-sm"
-        loading="lazy"
-        {...props}
-      />
-      {alt && (
-        <figcaption className="text-center text-sm text-gray-500 mt-2">
-          {alt}
-        </figcaption>
-      )}
-    </figure>
-  ),
+  // Images with design system styling
+  img: ({ alt, src, ...props }) => {
+    // Don't show alt text as caption if it looks like a filename
+    const isFilename = alt && /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(alt.trim())
+    const showCaption = alt && !isFilename && alt.trim().length > 0
 
-  // Lists
+    return (
+      <figure className="my-10">
+        <div className="relative rounded-2xl overflow-hidden shadow-soft-lg">
+          <img
+            src={src}
+            alt={alt || ''}
+            className="w-full h-auto"
+            loading="lazy"
+            {...props}
+          />
+        </div>
+        {showCaption && (
+          <figcaption className="text-center text-sm text-gray-500 mt-4 flex items-center justify-center gap-2">
+            <span className="w-8 h-px bg-primary-200" />
+            {alt}
+            <span className="w-8 h-px bg-primary-200" />
+          </figcaption>
+        )}
+      </figure>
+    )
+  },
+
+  // Lists with refined styling
   ul: ({ children, ...props }) => (
-    <ul className="list-disc list-outside pl-6 mb-4 space-y-1 text-gray-700" {...props}>
+    <ul className="my-6 space-y-3" {...props}>
       {children}
     </ul>
   ),
   ol: ({ children, ...props }) => (
-    <ol className="list-decimal list-outside pl-6 mb-4 space-y-1 text-gray-700" {...props}>
+    <ol className="my-6 space-y-3 list-none counter-reset-item" style={{ counterReset: 'item' }} {...props}>
       {children}
     </ol>
   ),
-  li: ({ children, ...props }) => (
-    <li className="leading-relaxed" {...props}>
-      {children}
+  li: ({ children, ordered, ...props }) => (
+    <li
+      className="flex items-start gap-3 text-gray-600 text-[17px] leading-relaxed"
+      {...props}
+    >
+      <span className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold mt-0.5 bg-primary-100 text-primary-600">
+        •
+      </span>
+      <span className="flex-1">{children}</span>
     </li>
   ),
 
-  // Blockquote
+  // Elegant blockquote
   blockquote: ({ children, ...props }) => (
     <blockquote
-      className="border-l-4 border-primary-500 pl-4 my-6 italic text-gray-600 bg-gray-50 py-3 pr-4 rounded-r-lg"
+      className="relative my-8 py-6 px-8 rounded-2xl bg-primary-50 border-l-4 border-primary-400"
       {...props}
     >
-      {children}
+      <div className="absolute -top-3 left-6 text-5xl font-display text-primary-200">"</div>
+      <div className="relative text-gray-600 italic text-lg leading-relaxed">
+        {children}
+      </div>
     </blockquote>
   ),
 
-  // Tables
+  // Modern tables
   table: ({ children, ...props }) => (
-    <div className="overflow-x-auto my-6">
-      <table className="min-w-full divide-y divide-gray-200 border rounded-lg" {...props}>
+    <div className="my-8 overflow-x-auto rounded-2xl shadow-soft">
+      <table className="min-w-full" {...props}>
         {children}
       </table>
     </div>
   ),
   thead: ({ children, ...props }) => (
-    <thead className="bg-gray-50" {...props}>
+    <thead className="bg-primary-50" {...props}>
       {children}
     </thead>
   ),
   th: ({ children, ...props }) => (
-    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900" {...props}>
+    <th className="px-6 py-4 text-left text-sm font-semibold tracking-wide text-gray-900" {...props}>
       {children}
     </th>
   ),
   td: ({ children, ...props }) => (
-    <td className="px-4 py-3 text-sm text-gray-700 border-t" {...props}>
+    <td className="px-6 py-4 text-sm text-gray-600 bg-white border-t border-gray-100" {...props}>
       {children}
     </td>
   ),
 
-  // Horizontal rule
+  // Elegant horizontal rule
   hr: (props) => (
-    <hr className="my-8 border-t border-gray-200" {...props} />
+    <div className="my-12 flex items-center justify-center gap-3" {...props}>
+      <div className="h-px flex-1 max-w-24 bg-gradient-to-r from-transparent to-primary-200" />
+      <div className="w-2 h-2 rounded-full bg-primary-500" />
+      <div className="h-px flex-1 max-w-24 bg-gradient-to-l from-transparent to-primary-200" />
+    </div>
   ),
 
   // Strong and emphasis
   strong: ({ children, ...props }) => (
-    <strong className="font-semibold text-gray-900" {...props}>
+    <strong className="font-bold text-gray-900" {...props}>
       {children}
     </strong>
   ),
   em: ({ children, ...props }) => (
-    <em className="italic" {...props}>
+    <em className="italic text-gray-600" {...props}>
       {children}
     </em>
   ),

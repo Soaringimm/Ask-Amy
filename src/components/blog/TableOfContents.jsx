@@ -110,7 +110,7 @@ export function FloatingTableOfContents({ content }) {
     return () => observer.disconnect()
   }, [headings])
 
-  if (headings.length < 3) return null
+  if (headings.length < 1) return null
 
   const handleClick = (id) => {
     const element = document.getElementById(id)
@@ -130,22 +130,25 @@ export function FloatingTableOfContents({ content }) {
 
   return (
     <nav className="hidden xl:block sticky top-24 max-h-[calc(100vh-120px)] overflow-y-auto">
-      <div className="border-l-2 border-gray-200 pl-4">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          目录
-        </h4>
-        <ul className="space-y-2">
+      <div className="rounded-xl p-5 bg-primary-50 border border-primary-100">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-1 h-4 rounded-full bg-gradient-to-b from-primary-500 to-primary-400" />
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-primary-600">
+            目录
+          </h4>
+        </div>
+        <ul className="space-y-2.5">
           {headings.map(({ level, text, id }) => (
             <li
               key={id}
-              style={{ paddingLeft: `${(level - 1) * 8}px` }}
+              style={{ paddingLeft: `${(level - 1) * 10}px` }}
             >
               <button
                 onClick={() => handleClick(id)}
-                className={`text-left text-sm leading-relaxed transition-colors hover:text-primary-600 ${
+                className={`text-left text-sm leading-relaxed transition-all duration-200 w-full truncate pl-2 -ml-2 border-l-2 ${
                   activeId === id
-                    ? 'text-primary-600 font-medium'
-                    : 'text-gray-500'
+                    ? 'text-primary-600 font-medium border-primary-500'
+                    : 'text-gray-500 border-transparent hover:text-gray-700'
                 }`}
               >
                 {text}

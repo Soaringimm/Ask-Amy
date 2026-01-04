@@ -1,5 +1,5 @@
-import { NavLink, useNavigate } from 'react-router-dom'
-import { FaSignOutAlt, FaCalendarAlt, FaBook, FaComments, FaUsers } from 'react-icons/fa'
+import { NavLink, useNavigate, Link } from 'react-router-dom'
+import { FaSignOutAlt, FaCalendarAlt, FaBook, FaComments, FaUsers, FaHome } from 'react-icons/fa'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function AdminLayout({ children }) {
@@ -18,13 +18,22 @@ export default function AdminLayout({ children }) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <h1 className="text-2xl font-bold text-primary-600">管理后台</h1>
-            <button
-              onClick={handleLogout}
-              className="flex items-center space-x-2 text-gray-700 hover:text-red-600 transition"
-            >
-              <FaSignOutAlt />
-              <span>退出</span>
-            </button>
+            <div className="flex items-center space-x-4">
+              <Link
+                to="/"
+                className="flex items-center space-x-2 px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition"
+              >
+                <FaHome />
+                <span>返回主页</span>
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="flex items-center space-x-2 px-4 py-2 rounded-lg text-gray-700 hover:text-red-600 hover:bg-red-50 transition"
+              >
+                <FaSignOutAlt />
+                <span>退出</span>
+              </button>
+            </div>
           </div>
         </div>
       </nav>

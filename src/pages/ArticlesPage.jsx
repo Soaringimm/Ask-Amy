@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { FaBook, FaSearch } from 'react-icons/fa'
+import { FaBook, FaSearch, FaNewspaper } from 'react-icons/fa'
+import { HiSparkles } from 'react-icons/hi2'
 import {
   ArticleCard,
   FeaturedArticleCard,
@@ -173,106 +174,128 @@ export default function ArticlesPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4 flex items-center">
-          <FaBook className="mr-3 text-primary-600" /> 文章
-        </h1>
-        <p className="text-gray-600 text-lg">
-          专业知识分享与移民资讯
-        </p>
-      </div>
+    <div className="min-h-screen">
+      {/* Hero Section */}
+      <section className="relative bg-gradient-to-br from-primary-50 via-white to-accent-50/30 py-12 overflow-hidden">
+        {/* Decorative elements */}
+        <div className="absolute top-0 right-0 w-72 h-72 bg-primary-200/30 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-accent-200/20 rounded-full blur-3xl" />
 
-      {/* Search and filters */}
-      <div className="mb-8 space-y-4">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 max-w-md">
-            <SearchBar
-              value={searchQuery}
-              onChange={handleSearch}
-              placeholder="搜索文章标题或内容..."
-            />
-          </div>
-        </div>
-
-        {/* Tag filter */}
-        {tags.length > 0 && (
-          <TagFilter
-            tags={tags}
-            selectedTag={selectedTag}
-            onTagSelect={handleTagSelect}
-          />
-        )}
-      </div>
-
-      {/* Active filters info */}
-      {(searchQuery || selectedTag) && (
-        <div className="mb-6 flex items-center gap-2 text-sm text-gray-600">
-          <FaSearch className="w-4 h-4" />
-          <span>
-            找到 {totalCount} 篇文章
-            {searchQuery && ` 包含 "${searchQuery}"`}
-            {selectedTag && ` 标签: ${tags.find((t) => t.slug === selectedTag)?.name}`}
-          </span>
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-          {error}
-        </div>
-      )}
-
-      {/* Content */}
-      {loading ? (
-        <ArticleListSkeleton count={6} />
-      ) : articles.length === 0 ? (
-        <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-          <div className="text-gray-400 text-6xl mb-4">
-            <FaBook />
-          </div>
-          <p className="text-gray-500 text-lg">
-            {searchQuery || selectedTag ? '没有找到匹配的文章' : '暂无文章'}
-          </p>
-          {(searchQuery || selectedTag) && (
-            <button
-              onClick={() => setSearchParams({})}
-              className="mt-4 text-primary-600 hover:text-primary-700"
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-4 mb-4">
+            <div
+              className="inline-flex items-center justify-center w-12 h-12 rounded-2xl text-white"
+              style={{ background: 'linear-gradient(to bottom right, #4150e6, #5a6ef2)' }}
             >
-              清除筛选
-            </button>
-          )}
-        </div>
-      ) : (
-        <>
-          {/* Featured article */}
-          {featuredArticle && (
-            <div className="mb-8">
-              <FeaturedArticleCard article={featuredArticle} />
+              <FaNewspaper className="text-xl" />
             </div>
-          )}
-
-          {/* Article grid */}
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {regularArticles.map((article) => (
-              <ArticleCard key={article.id} article={article} />
-            ))}
+            <h1 className="font-display text-4xl font-bold text-primary-950">
+              文章
+            </h1>
           </div>
+          <p className="text-gray-600 text-lg mb-8">
+            专业知识分享与移民资讯
+          </p>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="mt-12">
-              <Pagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={handlePageChange}
+          {/* Search */}
+          <div className="max-w-2xl">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <FaSearch className="text-gray-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="搜索文章标题或内容..."
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl shadow-soft focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-400 text-gray-900 placeholder-gray-400 transition-all duration-200"
               />
             </div>
-          )}
-        </>
-      )}
+          </div>
+        </div>
+      </section>
+
+      {/* Content Section */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Tag filter */}
+        {tags.length > 0 && (
+          <div className="mb-8">
+            <TagFilter
+              tags={tags}
+              selectedTag={selectedTag}
+              onTagSelect={handleTagSelect}
+            />
+          </div>
+        )}
+
+        {/* Active filters info */}
+        {(searchQuery || selectedTag) && (
+          <div className="mb-6 flex items-center gap-2 text-sm text-gray-600">
+            <FaSearch className="w-4 h-4" />
+            <span>
+              找到 <span className="font-semibold text-primary-600">{totalCount}</span> 篇文章
+              {searchQuery && ` 包含 "${searchQuery}"`}
+              {selectedTag && ` 标签: ${tags.find((t) => t.slug === selectedTag)?.name}`}
+            </span>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6">
+            {error}
+          </div>
+        )}
+
+        {/* Content */}
+        {loading ? (
+          <ArticleListSkeleton count={6} />
+        ) : articles.length === 0 ? (
+          <div className="card p-12 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
+              <FaBook className="text-gray-400 text-2xl" />
+            </div>
+            <p className="text-gray-500 text-lg">
+              {searchQuery || selectedTag ? '没有找到匹配的文章' : '暂无文章'}
+            </p>
+            {(searchQuery || selectedTag) && (
+              <button
+                onClick={() => setSearchParams({})}
+                className="mt-4 text-primary-600 hover:text-primary-700 font-medium"
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Featured article */}
+            {featuredArticle && (
+              <div className="mb-8">
+                <FeaturedArticleCard article={featuredArticle} />
+              </div>
+            )}
+
+            {/* Article grid */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {regularArticles.map((article) => (
+                <ArticleCard key={article.id} article={article} />
+              ))}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-12">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </div>
   )
 }

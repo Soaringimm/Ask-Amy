@@ -149,9 +149,9 @@ export default function ArticleDetailPage() {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex gap-8">
+        <div className="flex gap-8 justify-center xl:justify-start">
           {/* Main content */}
-          <div className="flex-1 max-w-4xl">
+          <div className="flex-1 max-w-4xl w-full">
             <div className={`${article.cover_image ? '-mt-32 relative z-10' : 'pt-8'}`}>
               {/* Back link */}
               <Link
@@ -166,38 +166,38 @@ export default function ArticleDetailPage() {
                 返回文章列表
               </Link>
 
-              <article className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <article className="bg-white rounded-2xl overflow-hidden shadow-soft-lg">
                 {/* Article header */}
-                <header className="p-6 md:p-8 pb-0">
+                <header className="p-6 md:p-10 pb-0">
                   {/* Tags */}
                   {tags.length > 0 && (
-                    <TagList tags={tags} size="sm" className="mb-4" />
+                    <TagList tags={tags} size="sm" className="mb-5" />
                   )}
 
                   {/* Title */}
-                  <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4 leading-tight">
+                  <h1 className="font-display text-3xl md:text-4xl font-bold mb-5 leading-tight text-gray-900">
                     {article.title}
                   </h1>
 
                   {/* Author and meta */}
-                  <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b">
+                  <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-primary-100">
                     <AuthorInfo
                       author={author}
                       publishedAt={article.published_at}
                       readingTime={article.reading_time}
                     />
 
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                    <div className="flex items-center gap-5 text-sm text-gray-500">
                       <FavoriteButton articleId={article.id} size="md" showCount />
                       {article.view_count !== undefined && (
-                        <span className="flex items-center gap-1">
-                          <FaEye className="w-4 h-4" />
+                        <span className="flex items-center gap-1.5">
+                          <FaEye className="w-4 h-4 text-primary-300" />
                           {article.view_count} 次阅读
                         </span>
                       )}
                       {article.reading_time && (
-                        <span className="flex items-center gap-1">
-                          <FaClock className="w-4 h-4" />
+                        <span className="flex items-center gap-1.5">
+                          <FaClock className="w-4 h-4 text-primary-300" />
                           {article.reading_time} 分钟
                         </span>
                       )}
@@ -206,12 +206,12 @@ export default function ArticleDetailPage() {
                 </header>
 
                 {/* Mobile TOC */}
-                <div className="px-6 md:px-8 pt-6 xl:hidden">
+                <div className="px-6 md:px-10 pt-6 xl:hidden">
                   <TableOfContents content={article.content} />
                 </div>
 
                 {/* Article content */}
-                <div className="p-6 md:p-8">
+                <div className="p-6 md:p-10 pt-8">
                   <MarkdownRenderer content={article.content} />
                 </div>
 
