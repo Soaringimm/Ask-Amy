@@ -12,14 +12,14 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     // Safety timeout: if initialization takes too long, proceed without auth
-    // This prevents the app from being stuck in loading state
+    // With expired session pre-clearing, this should rarely trigger
     initTimeoutRef.current = setTimeout(() => {
       if (!initializedRef.current) {
         console.warn('Auth initialization timeout - proceeding without session')
         initializedRef.current = true
         setLoading(false)
       }
-    }, 10000) // 10 second safety net
+    }, 5000) // 5 second safety net (reduced from 10s due to pre-clearing)
 
     // Use onAuthStateChange as the single source of truth for auth state
     // INITIAL_SESSION event fires on mount with current session (or null)

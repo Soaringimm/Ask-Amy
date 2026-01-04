@@ -7,10 +7,43 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required')
 }
 
+// Pre-check and clear expired session data BEFORE creating Supabase client
+// This prevents the client from attempting to refresh expired tokens which can hang
+const clearExpiredSession = () => {
+  try {
+    const storageKey = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`
+    const stored = localStorage.getItem(storageKey)
+    if (!stored) return
+
+    const session = JSON.parse(stored)
+    const expiresAt = session?.expires_at
+
+    if (expiresAt) {
+      // Add 60 second buffer - if token expires within 60 seconds, clear it
+      const isExpired = Date.now() / 1000 > expiresAt - 60
+      if (isExpired) {
+        console.log('Clearing expired session data to prevent initialization hang')
+        localStorage.removeItem(storageKey)
+      }
+    }
+  } catch {
+    // If parsing fails, clear potentially corrupted data
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+      .forEach(k => localStorage.removeItem(k))
+  }
+}
+
+clearExpiredSession()
+
 // Custom fetch with timeout to prevent hanging requests
+// Reduced to 4 seconds for auth-related requests to fail fast
 const fetchWithTimeout = (url, options = {}) => {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 8000) // 8 second timeout
+  // Use shorter timeout for auth endpoints, longer for data
+  const isAuthRequest = url.includes('/auth/')
+  const timeoutMs = isAuthRequest ? 4000 : 8000
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   return fetch(url, {
     ...options,
