@@ -24,7 +24,17 @@ RUN npm run build
 
 # Production stage
 FROM nginx:alpine
+
+# Install envsubst (gettext package)
+RUN apk add --no-cache gettext
+
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+
+# Runtime environment variable for token
+ENV SEARCH_SERVICE_TOKEN=""
+
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+
+# Use envsubst to replace variables in nginx config at runtime
+CMD ["/bin/sh", "-c", "envsubst '${SEARCH_SERVICE_TOKEN}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
