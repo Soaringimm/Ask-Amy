@@ -12,8 +12,8 @@ git pull origin main
 
 # Rebuild and restart Docker container
 echo "🐳 Rebuilding Docker container..."
-docker compose down
-docker compose up -d --build
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d --build
 
 # Show container status
 echo "✅ Deployment complete!"
