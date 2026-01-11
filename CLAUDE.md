@@ -16,3 +16,18 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+## Server Operations
+
+Production server credentials are stored in `.env`:
+- `PROD_SERVER_HOST`: Server IP
+- `PROD_SERVER_USER`: SSH username
+- `PROD_SERVER_PASSWORD`: SSH password
+
+SSH command: `sshpass -p "$PROD_SERVER_PASSWORD" ssh $PROD_SERVER_USER@$PROD_SERVER_HOST`
+
+### Common Issues
+
+**502 Bad Gateway on /api/help-centre/search**:
+- Cause: search-service restart causes IP change, nginx DNS cache stale
+- Fix: `docker restart ask-amy`
