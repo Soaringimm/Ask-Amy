@@ -16,6 +16,7 @@ services:
       - "8507:80"
     networks:
       - local-network
+      - immicore-network
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -39,4 +40,6 @@ services:
 
 networks:
   local-network:
+    external: true
+  immicore-network:
     external: true
