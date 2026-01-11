@@ -20,14 +20,19 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ## Server Operations
 
 Production server credentials are stored in `.env`:
-- `PROD_SERVER_HOST`: Server IP
+- `PROD_SERVER_HOST`: Server IP (192.168.1.98)
 - `PROD_SERVER_USER`: SSH username
 - `PROD_SERVER_PASSWORD`: SSH password
 
 SSH command: `sshpass -p "$PROD_SERVER_PASSWORD" ssh $PROD_SERVER_USER@$PROD_SERVER_HOST`
 
-### Common Issues
+### Deployment
 
-**502 Bad Gateway on /api/help-centre/search**:
-- Cause: search-service restart causes IP change, nginx DNS cache stale
-- Fix: `docker restart ask-amy`
+Production directory: `/home/jacky/apps/Ask-Amy/`
+Deploy: `cd /home/jacky/apps/Ask-Amy && git pull && docker compose -f docker-compose.prod.yml build && docker compose -f docker-compose.prod.yml up -d`
+
+### Architecture
+
+- ask-amy container uses Docker DNS resolver (127.0.0.11) for dynamic IP resolution
+- Connected to both `local-network` and `immicore-network`
+- Proxies `/api/help-centre/` to `immicore-search-service-1:3104`
