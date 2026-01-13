@@ -10,10 +10,12 @@ cd /home/jacky/apps/Ask-Amy
 echo "📥 Pulling latest code from GitHub..."
 git pull origin main
 
-# Rebuild and restart Docker container
-echo "🐳 Rebuilding Docker container..."
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml up -d --build
+# Build and update containers (rolling update)
+echo "🐳 Building containers..."
+docker compose -f docker-compose.prod.yml build
+
+echo "🔄 Updating containers (rolling update)..."
+docker compose -f docker-compose.prod.yml up -d
 
 # Show container status
 echo "✅ Deployment complete!"
