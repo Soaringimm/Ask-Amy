@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/help-centre': {
-        target: 'http://localhost:8005',
+        target: 'https://es_search.jackyzhang.app',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/help-centre/, '/api/v1/help-centre'),
       },

@@ -15,7 +15,6 @@ services:
     ports:
       - "8507:80"
     networks:
-      - local-network
       - immicore-network
     restart: unless-stopped
     logging:
@@ -39,7 +38,5 @@ services:
           memory: 256M
 
 networks:
-  local-network:
-    external: true
   immicore-network:
     external: true
