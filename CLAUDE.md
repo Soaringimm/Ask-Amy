@@ -44,7 +44,10 @@ Deploy: `cd /home/jacky/apps/Ask-Amy && git pull && docker compose -f docker-com
 数据库运行在生产服务器上（不是本地），Supabase 配置可从 `~/immicore/.env` 获取：
 
 - **PostgreSQL**: `postgresql://postgres:<password>@192.168.1.98:5432/postgres`
-- **Supabase API**: `http://192.168.1.98:8002`
+- **Supabase API (公网)**: `https://supabase.jackyzhang.app`
+- **Supabase API (内网)**: `http://192.168.1.98:8002`
+
+前端应使用公网 URL 以确保验证邮件和密码重置链接正常工作。
 
 运行 SQL 迁移：
 ```bash
