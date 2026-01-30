@@ -36,8 +36,8 @@ export default function AdminLogin() {
 
       if (profileError) throw profileError;
 
-      if (profileData.role !== 'admin') {
-        // If not an admin, sign them out immediately
+      if (profileData.role !== 'admin' && profileData.role !== 'superuser') {
+        // If not an admin or superuser, sign them out immediately
         await supabase.auth.signOut();
         throw new Error('您无权访问此管理页面。请联系管理员。');
       }
