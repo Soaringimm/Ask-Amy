@@ -145,12 +145,15 @@ export const AuthProvider = ({ children }) => {
   }
 
   const signOut = async () => {
-    setLoading(true)
-    const { error } = await supabase.auth.signOut()
-    setLoading(false)
-    if (error) throw error
-    setUser(null)
-    setProfile(null)
+    try {
+      await supabase.auth.signOut()
+    } catch (error) {
+      console.error('Sign out error:', error)
+    } finally {
+      // Always clear local state regardless of API result
+      setUser(null)
+      setProfile(null)
+    }
   }
 
   const resetPassword = async (email) => {

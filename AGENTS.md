@@ -20,3 +20,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 - 不需要输出太多中间过程，尽可能简明而要
 ## Temp files
 - all temp files should be in the project directory's tmp sub folder
+
+## Server Access Policy
+- 访问服务器的方式是只读，绝对不允许修改任何内容
+- 如果需要修改，只能提出修改方案
