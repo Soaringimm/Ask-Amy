@@ -1,5 +1,5 @@
 import { NavLink, useNavigate, Link } from 'react-router-dom'
-import { FaSignOutAlt, FaCalendarAlt, FaBook, FaComments, FaUsers, FaHome } from 'react-icons/fa'
+import { FaSignOutAlt, FaCalendarAlt, FaBook, FaComments, FaUsers, FaHome, FaLightbulb } from 'react-icons/fa'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function AdminLayout({ children }) {
@@ -81,6 +81,16 @@ export default function AdminLayout({ children }) {
               }
             >
               <FaUsers className="mr-2.5 flex-shrink-0" /> 用户管理
+            </NavLink>
+            <NavLink
+              to="/admin/feedback"
+              className={({ isActive }) =>
+                `flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                  isActive ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`
+              }
+            >
+              <FaLightbulb className="mr-2.5 flex-shrink-0" /> 意见反馈
             </NavLink>
           </nav>
         </aside>

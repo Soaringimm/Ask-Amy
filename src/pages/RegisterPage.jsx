@@ -32,6 +32,12 @@ export default function RegisterPage() {
     e.preventDefault()
     setError(null)
 
+    // Validate display name
+    if (!displayName.trim()) {
+      setError('请输入昵称')
+      return
+    }
+
     // Validate password
     const passwordError = validatePassword(password)
     if (passwordError) {
@@ -144,15 +150,16 @@ export default function RegisterPage() {
 
             <div>
               <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-2">
-                昵称
+                昵称 <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 id="displayName"
+                required
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="input"
-                placeholder="您的昵称（可选）"
+                placeholder="您的昵称"
               />
             </div>
 

@@ -187,7 +187,8 @@ export const AuthProvider = ({ children }) => {
     resetPassword,
     updatePassword,
     updateProfile,
-    isAdmin: profile?.role === 'admin',
+    isAdmin: profile?.role === 'admin' || profile?.role === 'superuser',
+    isSuperuser: profile?.role === 'superuser',
   }
 
   // Don't block rendering - let app load immediately, auth state will update async

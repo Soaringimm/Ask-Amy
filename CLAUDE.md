@@ -36,3 +36,23 @@ Deploy: `cd /home/jacky/apps/Ask-Amy && git pull && docker compose -f docker-com
 - ask-amy container uses Docker DNS resolver (127.0.0.11) for dynamic IP resolution
 - Connected to both `local-network` and `immicore-network`
 - Proxies `/api/help-centre/` to `immicore-search-service-1:3104`
+
+## Database
+
+### Connection
+
+数据库运行在生产服务器上（不是本地），Supabase 配置可从 `~/immicore/.env` 获取：
+
+- **PostgreSQL**: `postgresql://postgres:<password>@192.168.1.98:5432/postgres`
+- **Supabase API**: `http://192.168.1.98:8002`
+
+运行 SQL 迁移：
+```bash
+/opt/homebrew/opt/libpq/bin/psql "$DATABASE_URL" -f supabase/sql/your_migration.sql
+```
+
+### Naming Conventions
+
+- **所有表必须使用 `aa_` 前缀**（如 `aa_profiles`, `aa_articles`, `aa_feedback`）
+- 这是为了在共享的 Supabase 实例中区分 Ask-Amy 项目的表
+- Storage bucket 也使用 `aa_` 前缀（如 `aa_feedback_images`）

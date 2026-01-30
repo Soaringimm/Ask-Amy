@@ -32,6 +32,7 @@ export default function AdminUsers() {
   const [filterRole, setFilterRole] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [actionLoading, setActionLoading] = useState(null)
+  const [roleModalUser, setRoleModalUser] = useState(null)
 
   // Stats
   const [stats, setStats] = useState({
@@ -53,11 +54,11 @@ export default function AdminUsers() {
         .from('aa_profiles')
         .select('*', { count: 'exact', head: true })
 
-      // Admin count
+      // Admin count (admin + superuser)
       const { count: admins } = await supabase
         .from('aa_profiles')
         .select('*', { count: 'exact', head: true })
-        .eq('role', 'admin')
+        .in('role', ['admin', 'superuser'])
 
       // Active users
       const { count: active } = await supabase
@@ -140,9 +141,9 @@ export default function AdminUsers() {
     setCurrentPage(1)
   }
 
-  const handleToggleRole = async (userId, currentRole) => {
-    const newRole = currentRole === 'admin' ? 'client' : 'admin'
+  const handleChangeRole = async (userId, newRole) => {
     setActionLoading(userId)
+    setRoleModalUser(null)
 
     try {
       const { error } = await supabase
@@ -275,6 +276,7 @@ export default function AdminUsers() {
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             >
               <option value="all">所有角色</option>
+              <option value="superuser">超级用户</option>
               <option value="admin">管理员</option>
               <option value="client">普通用户</option>
             </select>
@@ -376,12 +378,19 @@ export default function AdminUsers() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              user.role === 'admin'
+                              user.role === 'superuser'
+                                ? 'bg-red-100 text-red-800'
+                                : user.role === 'admin'
                                 ? 'bg-purple-100 text-purple-800'
                                 : 'bg-gray-100 text-gray-800'
                             }`}
                           >
-                            {user.role === 'admin' ? (
+                            {user.role === 'superuser' ? (
+                              <>
+                                <FaUserShield className="w-3 h-3" />
+                                超级用户
+                              </>
+                            ) : user.role === 'admin' ? (
                               <>
                                 <FaUserShield className="w-3 h-3" />
                                 管理员
@@ -432,9 +441,9 @@ export default function AdminUsers() {
                             ) : (
                               <>
                                 <button
-                                  onClick={() => handleToggleRole(user.id, user.role)}
+                                  onClick={() => setRoleModalUser(user)}
                                   className="text-primary-600 hover:text-primary-700"
-                                  title={user.role === 'admin' ? '降级为普通用户' : '升级为管理员'}
+                                  title="修改角色"
                                 >
                                   <FaUserShield />
                                 </button>
@@ -493,6 +502,45 @@ export default function AdminUsers() {
             </>
           )}
         </div>
+
+        {/* Role Change Modal */}
+        {roleModalUser && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+              <h3 className="text-lg font-bold mb-4">修改用户角色</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                用户: {roleModalUser.display_name || roleModalUser.email}
+              </p>
+              <div className="space-y-2">
+                {[
+                  { value: 'client', label: '普通用户', desc: '只能访问公开内容' },
+                  { value: 'admin', label: '管理员', desc: '可以管理内容和用户' },
+                  { value: 'superuser', label: '超级用户', desc: '拥有所有权限' },
+                ].map((role) => (
+                  <button
+                    key={role.value}
+                    onClick={() => handleChangeRole(roleModalUser.id, role.value)}
+                    disabled={actionLoading === roleModalUser.id}
+                    className={`w-full text-left px-4 py-3 rounded-lg border transition ${
+                      roleModalUser.role === role.value
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="font-medium">{role.label}</div>
+                    <div className="text-xs text-gray-500">{role.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setRoleModalUser(null)}
+                className="mt-4 w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </AdminLayout>
   )

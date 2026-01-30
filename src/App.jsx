@@ -16,6 +16,7 @@ import AdminDashboard from './pages/AdminDashboard'
 import AdminArticles from './pages/AdminArticles'
 import AdminComments from './pages/AdminComments'
 import AdminUsers from './pages/AdminUsers'
+import AdminFeedback from './pages/AdminFeedback'
 import ProtectedRoute from './components/ProtectedRoute'
 import UserRoute from './components/UserRoute'
 
@@ -84,6 +85,14 @@ function App() {
         element={
           <ProtectedRoute>
             <AdminUsers />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/feedback"
+        element={
+          <ProtectedRoute>
+            <AdminFeedback />
           </ProtectedRoute>
         }
       />
