@@ -37,6 +37,24 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  meet-signal:
+    build:
+      context: ./meet-signal
+    container_name: meet-signal
+    restart: unless-stopped
+    networks:
+      - immicore-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+
 networks:
   immicore-network:
     external: true

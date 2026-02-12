@@ -11,6 +11,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import ProfilePage from './pages/ProfilePage'
 import FavoritesPage from './pages/FavoritesPage'
+import MeetPage from './pages/MeetPage'
 import AdminLogin from './pages/AdminLogin'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminArticles from './pages/AdminArticles'
@@ -29,6 +30,10 @@ function App() {
       <Route path="/consultation" element={<MainLayout><ConsultationPage /></MainLayout>} />
       <Route path="/articles" element={<MainLayout><ArticlesPage /></MainLayout>} />
       <Route path="/articles/:slug" element={<MainLayout><ArticleDetailPage /></MainLayout>} />
+
+      {/* Meet Routes */}
+      <Route path="/meet" element={<MeetPage />} />
+      <Route path="/meet/:id" element={<MeetPage />} />
 
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />

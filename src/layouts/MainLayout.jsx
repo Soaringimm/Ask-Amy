@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { FaHome, FaComments, FaNewspaper, FaSearch, FaUser, FaSignOutAlt, FaHeart, FaCog } from 'react-icons/fa'
+import { FaHome, FaComments, FaNewspaper, FaSearch, FaUser, FaSignOutAlt, FaHeart, FaCog, FaVideo } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -47,6 +47,7 @@ export default function MainLayout({ children }) {
     { to: '/knowledge-base', icon: FaSearch, label: 'IRCC问答' },
     { to: '/articles', icon: FaNewspaper, label: '文章' },
     { to: '/consultation', icon: FaComments, label: '预约咨询' },
+    { to: '/meet', icon: FaVideo, label: 'Meet' },
   ]
 
   return (
