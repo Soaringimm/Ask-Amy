@@ -116,6 +116,13 @@ export default function MeetPage() {
     } catch { /* ignore */ }
   }
 
+  // Attach local stream to video element once meeting view renders
+  useEffect(() => {
+    if (phase === 'connected' && localStreamRef.current && localVideoRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current
+    }
+  }, [phase])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => { cleanup() }
