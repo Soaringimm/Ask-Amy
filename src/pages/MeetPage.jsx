@@ -107,38 +107,7 @@ export default function MeetPage() {
       const socket = io(SIGNAL_URL, { path: '/socket.io/', transports: ['websocket', 'polling'] })
       socketRef.current = socket
 
-      // Register all socket event handlers BEFORE any async calls
-      // to avoid missing events that fire while awaiting getUserMedia
-      function onSocketReady() {
-        if (mode === 'create') {
-          socket.emit('create-room', (res) => {
-            if (res.roomId) {
-              setRoomId(res.roomId)
-              setPhase('connected')
-              window.history.replaceState(null, '', `/meet/${res.roomId}`)
-            }
-          })
-        } else {
-          socket.emit('join-room', targetRoomId, (res) => {
-            if (res.error) {
-              setError(res.error === 'Room not found' ? 'Meeting ID not found' : res.error)
-              setPhase('lobby')
-              return
-            }
-            setRoomId(targetRoomId)
-            setPhase('connected')
-            window.history.replaceState(null, '', `/meet/${targetRoomId}`)
-          })
-        }
-      }
-
-      // Handle connect - either already connected or wait for event
-      if (socket.connected) {
-        onSocketReady()
-      } else {
-        socket.on('connect', onSocketReady)
-      }
-
+      // 1. Register signaling handlers first (before any async)
       socket.on('peer-joined', (peerId) => {
         setPeerConnected(true)
         createPeerConnection(socket, peerId, true)
@@ -175,16 +144,10 @@ export default function MeetPage() {
         }
       })
 
-      // Get local media (after event handlers are set up)
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      localStreamRef.current = stream
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream
-      }
-
       socket.on('peer-left', () => {
         setPeerConnected(false)
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
         if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
         remoteDescSetRef.current = false
         pendingCandidatesRef.current = []
@@ -198,6 +161,42 @@ export default function MeetPage() {
         setError('Cannot connect to signal server')
         setPhase('lobby')
       })
+
+      // 2. Wait for BOTH socket connection and media access in parallel
+      const [stream] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+        new Promise((resolve) => {
+          if (socket.connected) resolve()
+          else socket.on('connect', () => resolve())
+        }),
+      ])
+
+      localStreamRef.current = stream
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      // 3. NOW join/create room — media is ready so signaling can begin safely
+      if (mode === 'create') {
+        socket.emit('create-room', (res) => {
+          if (res.roomId) {
+            setRoomId(res.roomId)
+            setPhase('connected')
+            window.history.replaceState(null, '', `/meet/${res.roomId}`)
+          }
+        })
+      } else {
+        socket.emit('join-room', targetRoomId, (res) => {
+          if (res.error) {
+            setError(res.error === 'Room not found' ? 'Meeting ID not found' : res.error)
+            setPhase('lobby')
+            return
+          }
+          setRoomId(targetRoomId)
+          setPhase('connected')
+          window.history.replaceState(null, '', `/meet/${targetRoomId}`)
+        })
+      }
 
     } catch (err) {
       setError(err.message || 'Failed to get camera/mic access')
