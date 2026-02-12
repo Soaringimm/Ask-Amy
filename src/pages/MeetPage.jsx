@@ -1,6 +1,16 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash, FaMusic, FaPlay, FaPause, FaPhone, FaCopy, FaCheck, FaSignInAlt } from 'react-icons/fa'
+import {
+  FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
+  FaMusic, FaPlay, FaPause, FaPhone, FaCopy, FaCheck, FaSignInAlt,
+  FaStepBackward, FaStepForward, FaListUl, FaSave, FaTrash,
+  FaPlus, FaTimes,
+} from 'react-icons/fa'
+import { supabase } from '../lib/supabase'
+import {
+  saveAudioFile, getAudioFile,
+  savePlaylist, getPlaylists, deletePlaylist as deletePlaylistApi,
+} from '../lib/playlistStorage'
 
 const SIGNAL_URL = window.location.origin
 const ICE_SERVERS = [
@@ -34,13 +44,20 @@ export default function MeetPage() {
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [audioEnabled, setAudioEnabled] = useState(true)
 
-  // Music state
-  const [musicFile, setMusicFile] = useState(null)
-  const [musicName, setMusicName] = useState('')
+  // Playlist state
+  const [playlist, setPlaylist] = useState([]) // [{ name, duration, buffer }]
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(-1)
   const [musicPlaying, setMusicPlaying] = useState(false)
   const [musicTime, setMusicTime] = useState(0)
   const [musicDuration, setMusicDuration] = useState(0)
   const [isMusicHost, setIsMusicHost] = useState(false)
+  const [showPlaylistPanel, setShowPlaylistPanel] = useState(false)
+
+  // Supabase auth + saved playlists
+  const [user, setUser] = useState(null)
+  const [savedPlaylists, setSavedPlaylists] = useState([])
+  const [playlistName, setPlaylistName] = useState('')
+  const [savingPlaylist, setSavingPlaylist] = useState(false)
 
   // Refs
   const socketRef = useRef(null)
@@ -53,7 +70,6 @@ export default function MeetPage() {
   const localStreamIdRef = useRef(null)
   const musicSourceRef = useRef(null)
   const audioCtxRef = useRef(null)
-  const musicBufferRef = useRef(null)
   const musicStartTimeRef = useRef(0)
   const musicOffsetRef = useRef(0)
   const gainNodeRef = useRef(null)
@@ -61,12 +77,48 @@ export default function MeetPage() {
   const animFrameRef = useRef(null)
   const pendingCandidatesRef = useRef([])
   const remoteDescSetRef = useRef(false)
+  // Keep refs in sync with state for use inside callbacks
+  const playlistRef = useRef([])
+  const currentTrackIndexRef = useRef(-1)
+  const musicPlayingRef = useRef(false)
+  const addMoreInputRef = useRef(null)
+
+  // Sync refs with state
+  useEffect(() => { playlistRef.current = playlist }, [playlist])
+  useEffect(() => { currentTrackIndexRef.current = currentTrackIndex }, [currentTrackIndex])
+  useEffect(() => { musicPlayingRef.current = musicPlaying }, [musicPlaying])
+
+  // Derived values
+  const currentTrack = playlist[currentTrackIndex] || null
+  const musicName = currentTrack?.name || ''
+
+  // ─── Auth check ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user) {
+        setUser(data.user)
+        fetchSavedPlaylists(data.user.id)
+      }
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user || null
+      setUser(u)
+      if (u) fetchSavedPlaylists(u.id)
+      else setSavedPlaylists([])
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  async function fetchSavedPlaylists(userId) {
+    try {
+      const data = await getPlaylists(userId)
+      setSavedPlaylists(data)
+    } catch { /* ignore */ }
+  }
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      cleanup()
-    }
+    return () => { cleanup() }
   }, [])
 
   // Auto-join if URL has room id
@@ -80,7 +132,7 @@ export default function MeetPage() {
   useEffect(() => {
     if (musicPlaying && isMusicHost) {
       const update = () => {
-        if (audioCtxRef.current && musicPlaying) {
+        if (audioCtxRef.current && musicPlayingRef.current) {
           const elapsed = audioCtxRef.current.currentTime - musicStartTimeRef.current + musicOffsetRef.current
           setMusicTime(Math.min(elapsed, musicDuration))
         }
@@ -100,6 +152,8 @@ export default function MeetPage() {
     if (socketRef.current) { socketRef.current.disconnect() }
   }
 
+  // ─── Connection ───────────────────────────────────────────────────────────
+
   async function initConnection(mode, targetRoomId) {
     setError('')
     try {
@@ -107,7 +161,6 @@ export default function MeetPage() {
       const socket = io(SIGNAL_URL, { path: '/socket.io/', transports: ['websocket', 'polling'] })
       socketRef.current = socket
 
-      // 1. Register signaling handlers first (before any async)
       socket.on('peer-joined', (peerId) => {
         setPeerConnected(true)
         createPeerConnection(socket, peerId, true)
@@ -153,16 +206,13 @@ export default function MeetPage() {
         pendingCandidatesRef.current = []
       })
 
-      socket.on('music-sync', (msg) => {
-        handleMusicSync(msg)
-      })
+      socket.on('music-sync', (msg) => { handleMusicSync(msg) })
 
       socket.on('connect_error', () => {
         setError('Cannot connect to signal server')
         setPhase('lobby')
       })
 
-      // 2. Wait for BOTH socket connection and media access in parallel
       const [stream] = await Promise.all([
         navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
         new Promise((resolve) => {
@@ -176,7 +226,6 @@ export default function MeetPage() {
         localVideoRef.current.srcObject = stream
       }
 
-      // 3. NOW join/create room — media is ready so signaling can begin safely
       if (mode === 'create') {
         socket.emit('create-room', (res) => {
           if (res.roomId) {
@@ -197,7 +246,6 @@ export default function MeetPage() {
           window.history.replaceState(null, '', `/meet/${targetRoomId}`)
         })
       }
-
     } catch (err) {
       setError(err.message || 'Failed to get camera/mic access')
       setPhase('lobby')
@@ -211,31 +259,26 @@ export default function MeetPage() {
     remoteDescSetRef.current = false
     pendingCandidatesRef.current = []
 
-    // Add local tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current)
       })
     }
 
-    // Add music stream if active
     if (musicStreamDestRef.current) {
       musicStreamDestRef.current.stream.getTracks().forEach(track => {
         pc.addTrack(track, musicStreamDestRef.current.stream)
       })
     }
 
-    // Route incoming tracks: camera/mic → video element, music → audio element
     pc.ontrack = (e) => {
       const stream = e.streams[0]
       if (!stream) return
-      // If stream has a video track, it's the camera stream
       if (stream.getVideoTracks().length > 0) {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream
         }
       } else {
-        // Audio-only stream = music
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = stream
           remoteAudioRef.current.play().catch(() => {})
@@ -265,46 +308,6 @@ export default function MeetPage() {
     }
   }
 
-  // Music handling
-  async function handleMusicFile(e) {
-    const file = e.target.files[0]
-    if (!file) return
-
-    setIsMusicHost(true)
-    setMusicName(file.name)
-    setMusicFile(file)
-
-    const ctx = new (window.AudioContext || window.webkitAudioContext)()
-    audioCtxRef.current = ctx
-
-    const arrayBuf = await file.arrayBuffer()
-    const audioBuffer = await ctx.decodeAudioData(arrayBuf)
-    musicBufferRef.current = audioBuffer
-    setMusicDuration(audioBuffer.duration)
-
-    // Create stream destination for sharing via WebRTC
-    const dest = ctx.createMediaStreamDestination()
-    musicStreamDestRef.current = dest
-    const gain = ctx.createGain()
-    gain.connect(dest)
-    gain.connect(ctx.destination) // local playback
-    gainNodeRef.current = gain
-
-    // Notify peer about the music file name
-    if (socketRef.current) {
-      socketRef.current.emit('music-sync', { type: 'load', name: file.name, duration: audioBuffer.duration })
-    }
-
-    // Add music track to existing peer connection
-    if (pcRef.current) {
-      dest.stream.getTracks().forEach(track => {
-        pcRef.current.addTrack(track, dest.stream)
-      })
-      // Renegotiate
-      renegotiate()
-    }
-  }
-
   async function renegotiate() {
     const pc = pcRef.current
     const socket = socketRef.current
@@ -315,9 +318,152 @@ export default function MeetPage() {
     socket.emit('signal', { to: peerId, data: offer })
   }
 
+  // ─── Playlist / Music handling ────────────────────────────────────────────
+
+  function ensureAudioContext() {
+    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      audioCtxRef.current = ctx
+      const dest = ctx.createMediaStreamDestination()
+      musicStreamDestRef.current = dest
+      const gain = ctx.createGain()
+      gain.connect(dest)
+      gain.connect(ctx.destination)
+      gainNodeRef.current = gain
+    }
+    return audioCtxRef.current
+  }
+
+  async function handleMusicFiles(e) {
+    const files = Array.from(e.target.files)
+    if (!files.length) return
+
+    setIsMusicHost(true)
+    const ctx = ensureAudioContext()
+
+    const newTracks = []
+    for (const file of files) {
+      const arrayBuf = await file.arrayBuffer()
+      const audioBuffer = await ctx.decodeAudioData(arrayBuf.slice(0)) // slice to avoid detached buffer
+      newTracks.push({ name: file.name, duration: audioBuffer.duration, buffer: audioBuffer })
+      // Save blob to IndexedDB for later playlist restore
+      await saveAudioFile(file.name, file, audioBuffer.duration)
+    }
+
+    const updated = [...playlistRef.current, ...newTracks]
+    setPlaylist(updated)
+
+    // If nothing was playing, start the first new track
+    if (currentTrackIndexRef.current === -1) {
+      const startIdx = playlistRef.current.length // first new track index
+      playTrackAtIndex(startIdx, updated)
+    }
+
+    // Add music stream to peer connection if not yet added
+    if (pcRef.current && musicStreamDestRef.current) {
+      const existingSenders = pcRef.current.getSenders()
+      const musicTracks = musicStreamDestRef.current.stream.getTracks()
+      const alreadyAdded = musicTracks.every(t =>
+        existingSenders.some(s => s.track === t)
+      )
+      if (!alreadyAdded) {
+        musicTracks.forEach(track => {
+          pcRef.current.addTrack(track, musicStreamDestRef.current.stream)
+        })
+        renegotiate()
+      }
+    }
+
+    // Sync full track list to peer
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', {
+        type: 'load-playlist',
+        tracks: updated.map(t => ({ name: t.name, duration: t.duration })),
+        index: currentTrackIndexRef.current === -1 ? playlistRef.current.length : currentTrackIndexRef.current,
+      })
+    }
+
+    // Reset input so re-selecting same files works
+    e.target.value = ''
+  }
+
+  function playTrackAtIndex(index, pl) {
+    const tracks = pl || playlistRef.current
+    if (index < 0 || index >= tracks.length) return
+
+    const track = tracks[index]
+    const ctx = ensureAudioContext()
+
+    // Stop current source
+    if (musicSourceRef.current) {
+      try { musicSourceRef.current.stop() } catch {}
+      musicSourceRef.current = null
+    }
+
+    const source = ctx.createBufferSource()
+    source.buffer = track.buffer
+    source.connect(gainNodeRef.current)
+    source.start(0)
+    musicSourceRef.current = source
+    musicStartTimeRef.current = ctx.currentTime
+    musicOffsetRef.current = 0
+
+    setCurrentTrackIndex(index)
+    setMusicDuration(track.duration)
+    setMusicTime(0)
+    setMusicPlaying(true)
+
+    source.onended = () => {
+      if (musicPlayingRef.current) {
+        onTrackEnded()
+      }
+    }
+
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', {
+        type: 'track-change',
+        index,
+        name: track.name,
+        duration: track.duration,
+      })
+    }
+  }
+
+  function onTrackEnded() {
+    const nextIdx = currentTrackIndexRef.current + 1
+    if (nextIdx < playlistRef.current.length) {
+      playTrackAtIndex(nextIdx)
+    } else {
+      // Playlist finished
+      setMusicPlaying(false)
+      musicOffsetRef.current = 0
+      setMusicTime(0)
+      if (socketRef.current) {
+        socketRef.current.emit('music-sync', { type: 'stop' })
+      }
+    }
+  }
+
+  function nextTrack() {
+    const nextIdx = currentTrackIndexRef.current + 1
+    if (nextIdx < playlist.length) {
+      playTrackAtIndex(nextIdx)
+    }
+  }
+
+  function prevTrack() {
+    // If more than 3 seconds in, restart current track; otherwise go to previous
+    if (musicTime > 3 && currentTrackIndex >= 0) {
+      playTrackAtIndex(currentTrackIndex)
+    } else if (currentTrackIndex > 0) {
+      playTrackAtIndex(currentTrackIndex - 1)
+    }
+  }
+
   function toggleMusic() {
-    if (!musicBufferRef.current || !audioCtxRef.current) return
+    if (currentTrackIndex === -1 || !playlist[currentTrackIndex]) return
     const ctx = audioCtxRef.current
+    if (!ctx) return
 
     if (musicPlaying) {
       // Pause
@@ -333,9 +479,10 @@ export default function MeetPage() {
         socketRef.current.emit('music-sync', { type: 'pause', time: elapsed })
       }
     } else {
-      // Play
+      // Resume
+      const track = playlist[currentTrackIndex]
       const source = ctx.createBufferSource()
-      source.buffer = musicBufferRef.current
+      source.buffer = track.buffer
       source.connect(gainNodeRef.current)
       source.start(0, musicOffsetRef.current)
       musicSourceRef.current = source
@@ -343,13 +490,8 @@ export default function MeetPage() {
       setMusicPlaying(true)
 
       source.onended = () => {
-        if (musicPlaying) {
-          setMusicPlaying(false)
-          musicOffsetRef.current = 0
-          setMusicTime(0)
-          if (socketRef.current) {
-            socketRef.current.emit('music-sync', { type: 'stop' })
-          }
+        if (musicPlayingRef.current) {
+          onTrackEnded()
         }
       }
 
@@ -366,13 +508,18 @@ export default function MeetPage() {
 
     if (musicPlaying && musicSourceRef.current) {
       musicSourceRef.current.stop()
-      const source = audioCtxRef.current.createBufferSource()
-      source.buffer = musicBufferRef.current
+      const ctx = audioCtxRef.current
+      const track = playlist[currentTrackIndex]
+      const source = ctx.createBufferSource()
+      source.buffer = track.buffer
       source.connect(gainNodeRef.current)
       source.start(0, seekTo)
       musicSourceRef.current = source
-      musicStartTimeRef.current = audioCtxRef.current.currentTime
+      musicStartTimeRef.current = ctx.currentTime
       musicOffsetRef.current = seekTo
+      source.onended = () => {
+        if (musicPlayingRef.current) onTrackEnded()
+      }
     } else {
       musicOffsetRef.current = seekTo
       setMusicTime(seekTo)
@@ -383,11 +530,52 @@ export default function MeetPage() {
     }
   }
 
+  function removeTrack(index) {
+    const updated = playlist.filter((_, i) => i !== index)
+    setPlaylist(updated)
+
+    if (index === currentTrackIndex) {
+      // Stop current and play next (or prev, or stop)
+      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+      musicSourceRef.current = null
+      if (updated.length === 0) {
+        setCurrentTrackIndex(-1)
+        setMusicPlaying(false)
+        setMusicTime(0)
+        setMusicDuration(0)
+      } else {
+        const newIdx = Math.min(index, updated.length - 1)
+        playTrackAtIndex(newIdx, updated)
+      }
+    } else if (index < currentTrackIndex) {
+      setCurrentTrackIndex(prev => prev - 1)
+    }
+
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', {
+        type: 'load-playlist',
+        tracks: updated.map(t => ({ name: t.name, duration: t.duration })),
+        index: currentTrackIndex > index ? currentTrackIndex - 1 : currentTrackIndex,
+      })
+    }
+  }
+
+  // ─── Music sync (peer side) ───────────────────────────────────────────────
+
   function handleMusicSync(msg) {
     switch (msg.type) {
-      case 'load':
-        setMusicName(msg.name)
+      case 'load-playlist':
+        // Peer loaded a playlist — we don't have audio buffers, just metadata
+        setPlaylist(msg.tracks.map(t => ({ name: t.name, duration: t.duration, buffer: null })))
+        setCurrentTrackIndex(msg.index)
+        setMusicDuration(msg.tracks[msg.index]?.duration || 0)
+        setIsMusicHost(false)
+        break
+      case 'track-change':
+        setCurrentTrackIndex(msg.index)
         setMusicDuration(msg.duration)
+        setMusicTime(0)
+        setMusicPlaying(true)
         setIsMusicHost(false)
         break
       case 'play':
@@ -406,26 +594,116 @@ export default function MeetPage() {
         setMusicPlaying(false)
         setMusicTime(0)
         break
+      // Legacy single-file load
+      case 'load':
+        setPlaylist([{ name: msg.name, duration: msg.duration, buffer: null }])
+        setCurrentTrackIndex(0)
+        setMusicDuration(msg.duration)
+        setIsMusicHost(false)
+        break
     }
   }
+
+  // ─── Save / Load playlists (Supabase + IndexedDB) ────────────────────────
+
+  async function handleSavePlaylist() {
+    if (!user || !playlistName.trim() || !playlist.length) return
+    setSavingPlaylist(true)
+    try {
+      const songs = playlist.map((t, i) => ({
+        name: t.name,
+        duration: t.duration,
+        order: i,
+      }))
+      await savePlaylist(user.id, playlistName.trim(), songs)
+      setPlaylistName('')
+      await fetchSavedPlaylists(user.id)
+    } catch (err) {
+      console.error('Failed to save playlist', err)
+    }
+    setSavingPlaylist(false)
+  }
+
+  async function handleLoadPlaylist(pl) {
+    setIsMusicHost(true)
+    const ctx = ensureAudioContext()
+
+    const tracks = []
+    const missing = []
+    for (const song of pl.songs) {
+      const stored = await getAudioFile(song.name)
+      if (stored && stored.blob) {
+        const arrayBuf = await stored.blob.arrayBuffer()
+        const audioBuffer = await ctx.decodeAudioData(arrayBuf)
+        tracks.push({ name: song.name, duration: audioBuffer.duration, buffer: audioBuffer })
+      } else {
+        missing.push(song.name)
+        tracks.push({ name: song.name, duration: song.duration, buffer: null })
+      }
+    }
+
+    setPlaylist(tracks)
+
+    if (missing.length > 0) {
+      setError(`Missing local files: ${missing.join(', ')}. Re-add them via + Add more songs.`)
+    }
+
+    // Start first playable track
+    const firstPlayable = tracks.findIndex(t => t.buffer)
+    if (firstPlayable >= 0) {
+      playTrackAtIndex(firstPlayable, tracks)
+    } else {
+      setCurrentTrackIndex(0)
+      setMusicDuration(tracks[0]?.duration || 0)
+    }
+
+    // Sync to peer
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', {
+        type: 'load-playlist',
+        tracks: tracks.map(t => ({ name: t.name, duration: t.duration })),
+        index: firstPlayable >= 0 ? firstPlayable : 0,
+      })
+    }
+
+    // Add music stream to peer connection
+    if (pcRef.current && musicStreamDestRef.current) {
+      const existingSenders = pcRef.current.getSenders()
+      const musicTracks = musicStreamDestRef.current.stream.getTracks()
+      const alreadyAdded = musicTracks.every(t =>
+        existingSenders.some(s => s.track === t)
+      )
+      if (!alreadyAdded) {
+        musicTracks.forEach(track => {
+          pcRef.current.addTrack(track, musicStreamDestRef.current.stream)
+        })
+        renegotiate()
+      }
+    }
+  }
+
+  async function handleDeletePlaylist(id) {
+    try {
+      await deletePlaylistApi(id)
+      setSavedPlaylists(prev => prev.filter(p => p.id !== id))
+    } catch (err) {
+      console.error('Failed to delete playlist', err)
+    }
+  }
+
+  // ─── Media toggles ───────────────────────────────────────────────────────
 
   function toggleVideo() {
     if (localStreamRef.current) {
       const vTrack = localStreamRef.current.getVideoTracks()[0]
-      if (vTrack) {
-        vTrack.enabled = !vTrack.enabled
-        setVideoEnabled(vTrack.enabled)
-      }
+      if (vTrack) { vTrack.enabled = !vTrack.enabled; setVideoEnabled(vTrack.enabled) }
     }
   }
 
   function toggleAudio() {
     if (localStreamRef.current) {
       const aTrack = localStreamRef.current.getAudioTracks()[0]
-      if (aTrack) {
-        aTrack.enabled = !aTrack.enabled
-        setAudioEnabled(aTrack.enabled)
-      }
+      if (aTrack) { aTrack.enabled = !aTrack.enabled; setAudioEnabled(aTrack.enabled) }
     }
   }
 
@@ -441,6 +719,7 @@ export default function MeetPage() {
   }
 
   function formatTime(sec) {
+    if (!sec || sec < 0) return '0:00'
     const m = Math.floor(sec / 60)
     const s = Math.floor(sec % 60)
     return `${m}:${s.toString().padStart(2, '0')}`
@@ -468,7 +747,6 @@ export default function MeetPage() {
           )}
 
           <div className="space-y-4">
-            {/* Create Meeting */}
             <button
               onClick={() => { setPhase('joining'); initConnection('create') }}
               className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-semibold text-lg transition-colors shadow-lg shadow-primary-600/20"
@@ -486,7 +764,6 @@ export default function MeetPage() {
               </div>
             </div>
 
-            {/* Join Meeting */}
             <div className="flex gap-2">
               <input
                 type="text"
@@ -538,7 +815,7 @@ export default function MeetPage() {
     )
   }
 
-  // Meeting view
+  // ─── Meeting view ─────────────────────────────────────────────────────────
   return (
     <div className="h-screen bg-gray-900 flex flex-col">
       {/* Top bar */}
@@ -556,52 +833,194 @@ export default function MeetPage() {
         </div>
       </div>
 
-      {/* Video area */}
-      <div className="flex-1 flex items-center justify-center gap-4 p-4 min-h-0">
-        {/* Remote (large) */}
-        <div className="flex-1 h-full relative rounded-2xl overflow-hidden bg-gray-800 flex items-center justify-center">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover"
-          />
-          {!peerConnected && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-gray-500 text-lg">Waiting for peer to join...</p>
-            </div>
-          )}
+      {/* Video area + Playlist panel */}
+      <div className="flex-1 flex min-h-0">
+        {/* Video */}
+        <div className="flex-1 flex items-center justify-center gap-4 p-4 relative">
+          <div className="flex-1 h-full relative rounded-2xl overflow-hidden bg-gray-800 flex items-center justify-center">
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            {!peerConnected && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <p className="text-gray-500 text-lg">Waiting for peer to join...</p>
+              </div>
+            )}
+          </div>
+          <div className="absolute bottom-4 right-6 w-48 h-36 rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700 z-10">
+            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover mirror" />
+          </div>
         </div>
 
-        {/* Local (small pip) */}
-        <div className="absolute bottom-32 right-6 w-48 h-36 rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700 z-10">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover mirror"
-          />
-        </div>
+        {/* Playlist side panel */}
+        {showPlaylistPanel && (
+          <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+              <h3 className="text-sm font-semibold text-white">Playlist</h3>
+              <button onClick={() => setShowPlaylistPanel(false)} className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white">
+                <FaTimes size={14} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {/* Now Playing */}
+              <div className="p-3">
+                <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">Now Playing</p>
+                {playlist.length === 0 ? (
+                  <p className="text-xs text-gray-500">No tracks loaded</p>
+                ) : (
+                  <div className="space-y-1">
+                    {playlist.map((track, i) => (
+                      <div
+                        key={`${track.name}-${i}`}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${
+                          i === currentTrackIndex
+                            ? 'bg-primary-600/20 text-primary-300'
+                            : 'text-gray-300 hover:bg-gray-700/50'
+                        }`}
+                        onClick={() => isMusicHost && track.buffer && playTrackAtIndex(i)}
+                      >
+                        <span className="text-xs w-5 text-right flex-shrink-0">
+                          {i === currentTrackIndex && musicPlaying ? (
+                            <span className="text-primary-400">&#9654;</span>
+                          ) : (
+                            <span className="text-gray-500">{i + 1}.</span>
+                          )}
+                        </span>
+                        <span className={`text-xs truncate flex-1 ${!track.buffer ? 'italic text-gray-500' : ''}`}>
+                          {track.name}
+                          {!track.buffer && ' (missing)'}
+                        </span>
+                        <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(track.duration)}</span>
+                        {isMusicHost && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeTrack(i) }}
+                            className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+                          >
+                            <FaTimes size={10} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add more songs */}
+                {isMusicHost && (
+                  <label className="mt-2 flex items-center gap-1.5 cursor-pointer text-xs text-primary-400 hover:text-primary-300 transition-colors">
+                    <FaPlus size={10} />
+                    Add more songs
+                    <input
+                      ref={addMoreInputRef}
+                      type="file"
+                      accept="audio/*"
+                      multiple
+                      onChange={handleMusicFiles}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Saved Playlists */}
+              <div className="border-t border-gray-700 p-3">
+                <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">
+                  Saved Playlists
+                  {!user && <span className="ml-1 text-gray-500 normal-case">(login required)</span>}
+                </p>
+
+                {user && playlist.length > 0 && (
+                  <div className="flex gap-1.5 mb-3">
+                    <input
+                      type="text"
+                      value={playlistName}
+                      onChange={(e) => setPlaylistName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSavePlaylist()}
+                      placeholder="Playlist name..."
+                      className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-primary-500"
+                    />
+                    <button
+                      onClick={handleSavePlaylist}
+                      disabled={!playlistName.trim() || savingPlaylist}
+                      className="px-2 py-1 rounded bg-primary-600 hover:bg-primary-500 disabled:bg-gray-600 text-white text-xs transition-colors"
+                    >
+                      <FaSave size={12} />
+                    </button>
+                  </div>
+                )}
+
+                {user ? (
+                  savedPlaylists.length === 0 ? (
+                    <p className="text-xs text-gray-500">No saved playlists yet</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {savedPlaylists.map(pl => (
+                        <div key={pl.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-700/40 group">
+                          <FaMusic className="text-gray-500 flex-shrink-0" size={10} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-gray-200 truncate">{pl.name}</p>
+                            <p className="text-[10px] text-gray-500">{pl.songs.length} songs</p>
+                          </div>
+                          <button
+                            onClick={() => handleLoadPlaylist(pl)}
+                            className="px-2 py-0.5 rounded text-[10px] bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+                          >
+                            Load
+                          </button>
+                          <button
+                            onClick={() => handleDeletePlaylist(pl.id)}
+                            className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+                          >
+                            <FaTrash size={10} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <a href="/login" className="text-xs text-primary-400 hover:text-primary-300 underline">
+                    Log in to save playlists
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Music bar */}
       <div className="px-4 py-2 bg-gray-800/80 backdrop-blur border-t border-gray-700">
-        <div className="flex items-center gap-3 max-w-3xl mx-auto">
+        <div className="flex items-center gap-3 max-w-4xl mx-auto">
           <FaMusic className="text-gray-400 flex-shrink-0" />
 
           {isMusicHost ? (
             <>
-              {!musicFile ? (
+              {playlist.length === 0 ? (
                 <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
                   Load Music
-                  <input type="file" accept="audio/*" onChange={handleMusicFile} className="hidden" />
+                  <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
                 </label>
               ) : (
                 <>
+                  {/* Prev */}
+                  <button
+                    onClick={prevTrack}
+                    disabled={currentTrackIndex <= 0 && musicTime <= 3}
+                    className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
+                  >
+                    <FaStepBackward size={11} />
+                  </button>
+                  {/* Play/Pause */}
                   <button onClick={toggleMusic} className="p-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white transition-colors flex-shrink-0">
                     {musicPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
                   </button>
+                  {/* Next */}
+                  <button
+                    onClick={nextTrack}
+                    disabled={currentTrackIndex >= playlist.length - 1}
+                    className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
+                  >
+                    <FaStepForward size={11} />
+                  </button>
+                  {/* Time + Progress */}
                   <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
                   <div className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group" onClick={seekMusic}>
                     <div
@@ -610,13 +1029,17 @@ export default function MeetPage() {
                     />
                   </div>
                   <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
+                  {/* Track info */}
                   <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
+                  {playlist.length > 1 && (
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                  )}
                 </>
               )}
             </>
           ) : (
             <>
-              {musicName ? (
+              {playlist.length > 0 ? (
                 <>
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${musicPlaying ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
                   <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
@@ -628,6 +1051,9 @@ export default function MeetPage() {
                   </div>
                   <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
                   <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
+                  {playlist.length > 1 && (
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                  )}
                 </>
               ) : (
                 <span className="text-xs text-gray-500">Peer can load music to listen together</span>
@@ -635,12 +1061,25 @@ export default function MeetPage() {
             </>
           )}
 
-          {/* Either user can load music */}
-          {!isMusicHost && !musicName && (
+          {/* Either user can load music when nothing loaded */}
+          {!isMusicHost && playlist.length === 0 && (
             <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors ml-auto">
               Load Music
-              <input type="file" accept="audio/*" onChange={handleMusicFile} className="hidden" />
+              <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
             </label>
+          )}
+
+          {/* Playlist panel toggle */}
+          {playlist.length > 0 && (
+            <button
+              onClick={() => setShowPlaylistPanel(p => !p)}
+              className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+                showPlaylistPanel ? 'bg-primary-600 text-white' : 'hover:bg-gray-700 text-gray-400 hover:text-white'
+              }`}
+              title="Playlist"
+            >
+              <FaListUl size={13} />
+            </button>
           )}
         </div>
       </div>
