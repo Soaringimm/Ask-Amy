@@ -4,7 +4,7 @@ import {
   FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
   FaMusic, FaPlay, FaPause, FaPhone, FaCopy, FaCheck, FaSignInAlt,
   FaStepBackward, FaStepForward, FaListUl, FaSave, FaTrash,
-  FaPlus, FaTimes, FaCircle, FaStop,
+  FaPlus, FaTimes, FaCircle, FaStop, FaEdit, FaHistory,
 } from 'react-icons/fa'
 import { supabase } from '../lib/supabase'
 import {
@@ -14,6 +14,7 @@ import {
 import {
   createRecordingMixer, createMeetRecorder,
   transcribeAudio, summarizeMeeting, saveRecording,
+  getRecordings, updateRecording, deleteRecording,
 } from '../lib/meetRecording'
 
 const SIGNAL_URL = window.location.origin
@@ -73,6 +74,12 @@ export default function MeetPage() {
   const [meetingSummary, setMeetingSummary] = useState(null)
   const [summaryError, setSummaryError] = useState('')
   const [summaryCopied, setSummaryCopied] = useState(false)
+  const [editingRecording, setEditingRecording] = useState(null) // the recording being viewed/edited
+  const [isEditing, setIsEditing] = useState(false)
+  const [editForm, setEditForm] = useState(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [recordings, setRecordings] = useState([])
+  const [showRecordings, setShowRecordings] = useState(false)
 
   // Supabase auth + saved playlists
   const [user, setUser] = useState(null)
@@ -125,13 +132,19 @@ export default function MeetPage() {
       if (data?.user) {
         setUser(data.user)
         fetchSavedPlaylists(data.user.id)
+        getRecordings(data.user.id).then(setRecordings).catch(() => {})
       }
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const u = session?.user || null
       setUser(u)
-      if (u) fetchSavedPlaylists(u.id)
-      else setSavedPlaylists([])
+      if (u) {
+        fetchSavedPlaylists(u.id)
+        getRecordings(u.id).then(setRecordings).catch(() => {})
+      } else {
+        setSavedPlaylists([])
+        setRecordings([])
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -830,9 +843,10 @@ export default function MeetPage() {
       const summary = await summarizeMeeting(transcript, meetingTopic)
 
       // Save to Supabase if logged in
+      let savedRecord = null
       if (user) {
         setProcessingState('saving')
-        await saveRecording({
+        savedRecord = await saveRecording({
           userId: user.id,
           roomId,
           topic: meetingTopic || null,
@@ -844,6 +858,10 @@ export default function MeetPage() {
 
       setProcessingState('done')
       setMeetingSummary({ ...summary, transcript })
+      if (savedRecord) {
+        setEditingRecording(savedRecord)
+        fetchRecordings()
+      }
     } catch (err) {
       console.error('Recording processing error:', err)
       setProcessingState('error')
@@ -876,6 +894,78 @@ export default function MeetPage() {
     setMeetingSummary(null)
     setProcessingState('')
     setSummaryError('')
+    setEditingRecording(null)
+    setIsEditing(false)
+    setEditForm(null)
+  }
+
+  // ─── Recording CRUD ────────────────────────────────────────────────────
+
+  async function fetchRecordings() {
+    if (!user) return
+    try {
+      const data = await getRecordings(user.id)
+      setRecordings(data)
+    } catch { /* ignore */ }
+  }
+
+  function openRecording(rec) {
+    setEditingRecording(rec)
+    setMeetingSummary({ ...rec.summary, transcript: rec.transcript })
+    setProcessingState('done')
+    setIsEditing(false)
+    setEditForm(null)
+  }
+
+  function startEditing() {
+    if (!editingRecording) return
+    const s = editingRecording.summary || {}
+    setEditForm({
+      title: s.title || '',
+      summary: s.summary || '',
+      keyPoints: (s.keyPoints || []).join('\n'),
+      actionItems: (s.actionItems || []).join('\n'),
+      decisions: (s.decisions || []).join('\n'),
+      transcript: editingRecording.transcript || '',
+    })
+    setIsEditing(true)
+  }
+
+  async function saveEdit() {
+    if (!editingRecording || !editForm) return
+    setSavingEdit(true)
+    try {
+      const newSummary = {
+        title: editForm.title,
+        summary: editForm.summary,
+        keyPoints: editForm.keyPoints.split('\n').filter(l => l.trim()),
+        actionItems: editForm.actionItems.split('\n').filter(l => l.trim()),
+        decisions: editForm.decisions.split('\n').filter(l => l.trim()),
+      }
+      const updated = await updateRecording(editingRecording.id, {
+        summary: newSummary,
+        transcript: editForm.transcript,
+      })
+      setEditingRecording(updated)
+      setMeetingSummary({ ...newSummary, transcript: editForm.transcript })
+      setIsEditing(false)
+      setEditForm(null)
+      fetchRecordings()
+    } catch (err) {
+      console.error('Failed to save edit:', err)
+    }
+    setSavingEdit(false)
+  }
+
+  async function handleDeleteRecording() {
+    if (!editingRecording) return
+    try {
+      await deleteRecording(editingRecording.id)
+      dismissSummary()
+      fetchRecordings()
+    } catch (err) {
+      console.error('Failed to delete recording:', err)
+    }
   }
 
   // ─── Media toggles ───────────────────────────────────────────────────────
@@ -1022,9 +1112,21 @@ export default function MeetPage() {
             {copied ? <FaCheck className="text-green-400" /> : <FaCopy />}
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
-          <span className="text-sm text-gray-300">{peerConnected ? 'Peer connected' : 'Waiting for peer...'}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
+            <span className="text-sm text-gray-300">{peerConnected ? 'Peer connected' : 'Waiting for peer...'}</span>
+          </div>
+          {user && recordings.length > 0 && (
+            <button
+              onClick={() => { setShowRecordings(true); fetchRecordings() }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-sm"
+              title="Past recordings"
+            >
+              <FaHistory size={12} />
+              <span>{recordings.length}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1414,20 +1516,68 @@ export default function MeetPage() {
         </div>
       )}
 
-      {/* Meeting summary overlay */}
+      {/* Meeting summary overlay — view / edit mode */}
       {processingState === 'done' && meetingSummary && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 rounded-2xl w-full max-w-lg max-h-[80vh] shadow-2xl border border-gray-700 flex flex-col">
+            {/* Header */}
             <div className="flex items-center justify-between p-5 border-b border-gray-700">
-              <h3 className="text-white font-semibold text-lg">{meetingSummary.title}</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={copySummaryText}
-                  className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
-                  title="Copy as Markdown"
-                >
-                  {summaryCopied ? <FaCheck className="text-green-400" size={14} /> : <FaCopy size={14} />}
-                </button>
+              {isEditing ? (
+                <input
+                  value={editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-white font-semibold text-lg outline-none focus:border-primary-500 mr-3"
+                />
+              ) : (
+                <h3 className="text-white font-semibold text-lg flex-1 min-w-0 truncate">{meetingSummary.title}</h3>
+              )}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {!isEditing && (
+                  <>
+                    <button
+                      onClick={copySummaryText}
+                      className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                      title="Copy as Markdown"
+                    >
+                      {summaryCopied ? <FaCheck className="text-green-400" size={14} /> : <FaCopy size={14} />}
+                    </button>
+                    {editingRecording && (
+                      <>
+                        <button
+                          onClick={startEditing}
+                          className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                          title="Edit"
+                        >
+                          <FaEdit size={14} />
+                        </button>
+                        <button
+                          onClick={handleDeleteRecording}
+                          className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-red-400 transition-colors"
+                          title="Delete recording"
+                        >
+                          <FaTrash size={14} />
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+                {isEditing && (
+                  <>
+                    <button
+                      onClick={saveEdit}
+                      disabled={savingEdit}
+                      className="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:bg-gray-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5"
+                    >
+                      <FaSave size={12} /> {savingEdit ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => { setIsEditing(false); setEditForm(null) }}
+                      className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={dismissSummary}
                   className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
@@ -1436,64 +1586,159 @@ export default function MeetPage() {
                 </button>
               </div>
             </div>
+
+            {/* Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {/* Summary */}
-              <p className="text-gray-300 text-sm leading-relaxed">{meetingSummary.summary}</p>
+              {isEditing ? (
+                <>
+                  {/* Edit: Summary */}
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Summary</label>
+                    <textarea
+                      value={editForm.summary}
+                      onChange={(e) => setEditForm({ ...editForm, summary: e.target.value })}
+                      rows={3}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-primary-500 resize-none"
+                    />
+                  </div>
+                  {/* Edit: Key Points */}
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Key Points <span className="normal-case text-gray-500">(one per line)</span></label>
+                    <textarea
+                      value={editForm.keyPoints}
+                      onChange={(e) => setEditForm({ ...editForm, keyPoints: e.target.value })}
+                      rows={4}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-primary-500 resize-none"
+                    />
+                  </div>
+                  {/* Edit: Action Items */}
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Action Items <span className="normal-case text-gray-500">(one per line)</span></label>
+                    <textarea
+                      value={editForm.actionItems}
+                      onChange={(e) => setEditForm({ ...editForm, actionItems: e.target.value })}
+                      rows={3}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-primary-500 resize-none"
+                    />
+                  </div>
+                  {/* Edit: Decisions */}
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Decisions <span className="normal-case text-gray-500">(one per line)</span></label>
+                    <textarea
+                      value={editForm.decisions}
+                      onChange={(e) => setEditForm({ ...editForm, decisions: e.target.value })}
+                      rows={3}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-primary-500 resize-none"
+                    />
+                  </div>
+                  {/* Edit: Transcript */}
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Transcript</label>
+                    <textarea
+                      value={editForm.transcript}
+                      onChange={(e) => setEditForm({ ...editForm, transcript: e.target.value })}
+                      rows={6}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-300 outline-none focus:border-primary-500 resize-none font-mono"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* View: Summary */}
+                  <p className="text-gray-300 text-sm leading-relaxed">{meetingSummary.summary}</p>
 
-              {/* Key Points */}
-              {meetingSummary.keyPoints?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Key Points</h4>
-                  <ul className="space-y-1.5">
-                    {meetingSummary.keyPoints.map((p, i) => (
-                      <li key={i} className="text-sm text-gray-300 flex gap-2">
-                        <span className="text-primary-400 mt-0.5 flex-shrink-0">&#8226;</span>
-                        {p}
-                      </li>
-                    ))}
-                  </ul>
+                  {/* View: Key Points */}
+                  {meetingSummary.keyPoints?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Key Points</h4>
+                      <ul className="space-y-1.5">
+                        {meetingSummary.keyPoints.map((p, i) => (
+                          <li key={i} className="text-sm text-gray-300 flex gap-2">
+                            <span className="text-primary-400 mt-0.5 flex-shrink-0">&#8226;</span>
+                            {p}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* View: Action Items */}
+                  {meetingSummary.actionItems?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Action Items</h4>
+                      <ul className="space-y-1.5">
+                        {meetingSummary.actionItems.map((a, i) => (
+                          <li key={i} className="text-sm text-gray-300 flex gap-2">
+                            <span className="text-yellow-400 mt-0.5 flex-shrink-0">&#9744;</span>
+                            {a}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* View: Decisions */}
+                  {meetingSummary.decisions?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Decisions</h4>
+                      <ul className="space-y-1.5">
+                        {meetingSummary.decisions.map((d, i) => (
+                          <li key={i} className="text-sm text-gray-300 flex gap-2">
+                            <span className="text-green-400 mt-0.5 flex-shrink-0">&#10003;</span>
+                            {d}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* View: Transcript */}
+                  <details className="group">
+                    <summary className="text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300">
+                      Full Transcript
+                    </summary>
+                    <pre className="mt-2 text-xs text-gray-400 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto bg-gray-900 rounded-lg p-3">
+                      {meetingSummary.transcript}
+                    </pre>
+                  </details>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recordings history panel */}
+      {showRecordings && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md max-h-[70vh] shadow-2xl border border-gray-700 flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-gray-700">
+              <h3 className="text-white font-semibold">Meeting Recordings</h3>
+              <button onClick={() => setShowRecordings(false)} className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors">
+                <FaTimes size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {recordings.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-8">No recordings yet</p>
+              ) : (
+                <div className="divide-y divide-gray-700/50">
+                  {recordings.map(rec => (
+                    <button
+                      key={rec.id}
+                      onClick={() => { setShowRecordings(false); openRecording(rec) }}
+                      className="w-full text-left px-5 py-3 hover:bg-gray-700/50 transition-colors"
+                    >
+                      <p className="text-sm text-white font-medium truncate">{rec.summary?.title || rec.topic || 'Untitled'}</p>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-xs text-gray-500">{new Date(rec.created_at).toLocaleDateString()}</span>
+                        <span className="text-xs text-gray-500">{formatTime(rec.duration_seconds)}</span>
+                        {rec.room_id && <span className="text-xs text-gray-600 font-mono">{rec.room_id}</span>}
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
-
-              {/* Action Items */}
-              {meetingSummary.actionItems?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Action Items</h4>
-                  <ul className="space-y-1.5">
-                    {meetingSummary.actionItems.map((a, i) => (
-                      <li key={i} className="text-sm text-gray-300 flex gap-2">
-                        <span className="text-yellow-400 mt-0.5 flex-shrink-0">&#9744;</span>
-                        {a}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Decisions */}
-              {meetingSummary.decisions?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Decisions</h4>
-                  <ul className="space-y-1.5">
-                    {meetingSummary.decisions.map((d, i) => (
-                      <li key={i} className="text-sm text-gray-300 flex gap-2">
-                        <span className="text-green-400 mt-0.5 flex-shrink-0">&#10003;</span>
-                        {d}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Transcript (collapsible) */}
-              <details className="group">
-                <summary className="text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300">
-                  Full Transcript
-                </summary>
-                <pre className="mt-2 text-xs text-gray-400 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto bg-gray-900 rounded-lg p-3">
-                  {meetingSummary.transcript}
-                </pre>
-              </details>
             </div>
           </div>
         </div>

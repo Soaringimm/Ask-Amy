@@ -129,3 +129,44 @@ export async function saveRecording({ userId, roomId, topic, durationSeconds, tr
   if (error) throw error
   return data
 }
+
+/**
+ * Get all recordings for the current user.
+ */
+export async function getRecordings(userId) {
+  const { data, error } = await supabase
+    .from('aa_meet_recordings')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Update a recording's summary, transcript, or topic.
+ */
+export async function updateRecording(id, updates) {
+  const { data, error } = await supabase
+    .from('aa_meet_recordings')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Delete a recording.
+ */
+export async function deleteRecording(id) {
+  const { error } = await supabase
+    .from('aa_meet_recordings')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
