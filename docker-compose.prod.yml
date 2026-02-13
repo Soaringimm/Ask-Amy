@@ -41,6 +41,8 @@ services:
     build:
       context: ./meet-signal
     container_name: meet-signal
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     restart: unless-stopped
     networks:
       - immicore-network
@@ -53,7 +55,7 @@ services:
       resources:
         limits:
           cpus: '0.25'
-          memory: 64M
+          memory: 256M
 
 networks:
   immicore-network:

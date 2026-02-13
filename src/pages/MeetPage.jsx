@@ -1,21 +1,30 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
   FaMusic, FaPlay, FaPause, FaPhone, FaCopy, FaCheck, FaSignInAlt,
   FaStepBackward, FaStepForward, FaListUl, FaSave, FaTrash,
-  FaPlus, FaTimes,
+  FaPlus, FaTimes, FaCircle, FaStop,
 } from 'react-icons/fa'
 import { supabase } from '../lib/supabase'
 import {
   saveAudioFile, getAudioFile,
   savePlaylist, getPlaylists, deletePlaylist as deletePlaylistApi,
 } from '../lib/playlistStorage'
+import {
+  createRecordingMixer, createMeetRecorder,
+  transcribeAudio, summarizeMeeting, saveRecording,
+} from '../lib/meetRecording'
 
 const SIGNAL_URL = window.location.origin
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls: 'turn:50.92.228.38:3478',
+    username: 'meet',
+    credential: 'meetpass123',
+  },
 ]
 
 // Dynamically load socket.io client
@@ -43,6 +52,7 @@ export default function MeetPage() {
   // Media state
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const [audioBlocked, setAudioBlocked] = useState(false)
 
   // Playlist state
   const [playlist, setPlaylist] = useState([]) // [{ name, duration, buffer }]
@@ -52,6 +62,17 @@ export default function MeetPage() {
   const [musicDuration, setMusicDuration] = useState(0)
   const [isMusicHost, setIsMusicHost] = useState(false)
   const [showPlaylistPanel, setShowPlaylistPanel] = useState(false)
+
+  // Recording state
+  const [isRecording, setIsRecording] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const [showTopicInput, setShowTopicInput] = useState(false)
+  const [meetingTopic, setMeetingTopic] = useState('')
+  const [processingState, setProcessingState] = useState('') // '' | 'transcribing' | 'summarizing' | 'saving' | 'done' | 'error'
+  const [meetingSummary, setMeetingSummary] = useState(null)
+  const [summaryError, setSummaryError] = useState('')
+  const [summaryCopied, setSummaryCopied] = useState(false)
 
   // Supabase auth + saved playlists
   const [user, setUser] = useState(null)
@@ -66,6 +87,7 @@ export default function MeetPage() {
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const remoteAudioRef = useRef(null)
+  const remoteAudioStreamRef = useRef(new MediaStream())
   const localStreamRef = useRef(null)
   const localStreamIdRef = useRef(null)
   const musicSourceRef = useRef(null)
@@ -77,6 +99,11 @@ export default function MeetPage() {
   const animFrameRef = useRef(null)
   const pendingCandidatesRef = useRef([])
   const remoteDescSetRef = useRef(false)
+  const recorderRef = useRef(null)
+  const recordingMixerCtxRef = useRef(null)
+  const recordingTimerRef = useRef(null)
+  const recordingStartRef = useRef(0)
+  const recordingPausedTimeRef = useRef(0)
   // Keep refs in sync with state for use inside callbacks
   const playlistRef = useRef([])
   const currentTrackIndexRef = useRef(-1)
@@ -121,7 +148,26 @@ export default function MeetPage() {
     if (phase === 'connected' && localStreamRef.current && localVideoRef.current) {
       localVideoRef.current.srcObject = localStreamRef.current
     }
+    // Bind any remote audio tracks that arrived before <audio> mounted
+    if (phase === 'connected' && remoteAudioRef.current && remoteAudioStreamRef.current.getTracks().length > 0) {
+      remoteAudioRef.current.srcObject = remoteAudioStreamRef.current
+      remoteAudioRef.current.play().then(() => {
+        setAudioBlocked(false)
+      }).catch(() => {
+        setAudioBlocked(true)
+      })
+    }
   }, [phase])
+
+  // Create persistent <audio> element on mount (always available regardless of phase)
+  useEffect(() => {
+    const audio = document.createElement('audio')
+    audio.autoplay = true
+    audio.playsInline = true
+    document.body.appendChild(audio)
+    remoteAudioRef.current = audio
+    return () => { audio.remove() }
+  }, [])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -150,9 +196,17 @@ export default function MeetPage() {
     }
   }, [musicPlaying, isMusicHost, musicDuration])
 
+  function stopCurrentSource() {
+    if (musicSourceRef.current) {
+      musicSourceRef.current.onended = null
+      try { musicSourceRef.current.stop() } catch {}
+      musicSourceRef.current = null
+    }
+  }
+
   function cleanup() {
     cancelAnimationFrame(animFrameRef.current)
-    if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
+    stopCurrentSource()
     if (audioCtxRef.current) { audioCtxRef.current.close() }
     if (pcRef.current) { pcRef.current.close() }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()) }
@@ -163,6 +217,7 @@ export default function MeetPage() {
 
   async function initConnection(mode, targetRoomId) {
     setError('')
+    setAudioBlocked(false)
     try {
       const io = await loadSocketIO()
       const socket = io(SIGNAL_URL, { path: '/socket.io/', transports: ['websocket', 'polling'] })
@@ -207,6 +262,7 @@ export default function MeetPage() {
       socket.on('peer-left', () => {
         setPeerConnected(false)
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+        remoteAudioStreamRef.current = new MediaStream()
         if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
         if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
         remoteDescSetRef.current = false
@@ -278,17 +334,23 @@ export default function MeetPage() {
       })
     }
 
+    remoteAudioStreamRef.current = new MediaStream()
+
     pc.ontrack = (e) => {
-      const stream = e.streams[0]
-      if (!stream) return
-      if (stream.getVideoTracks().length > 0) {
+      if (e.track.kind === 'video') {
         if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream
+          remoteVideoRef.current.srcObject = e.streams[0]
         }
-      } else {
+      } else if (e.track.kind === 'audio') {
+        // Collect ALL remote audio tracks (mic + music) into one stream
+        remoteAudioStreamRef.current.addTrack(e.track)
         if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = stream
-          remoteAudioRef.current.play().catch(() => {})
+          remoteAudioRef.current.srcObject = remoteAudioStreamRef.current
+          remoteAudioRef.current.play().then(() => {
+            setAudioBlocked(false)
+          }).catch(() => {
+            setAudioBlocked(true)
+          })
         }
       }
     }
@@ -401,11 +463,7 @@ export default function MeetPage() {
     const track = tracks[index]
     const ctx = ensureAudioContext()
 
-    // Stop current source
-    if (musicSourceRef.current) {
-      try { musicSourceRef.current.stop() } catch {}
-      musicSourceRef.current = null
-    }
+    stopCurrentSource()
 
     const source = ctx.createBufferSource()
     source.buffer = track.buffer
@@ -474,10 +532,7 @@ export default function MeetPage() {
 
     if (musicPlaying) {
       // Pause
-      if (musicSourceRef.current) {
-        musicSourceRef.current.stop()
-        musicSourceRef.current = null
-      }
+      stopCurrentSource()
       const elapsed = ctx.currentTime - musicStartTimeRef.current + musicOffsetRef.current
       musicOffsetRef.current = elapsed
       setMusicPlaying(false)
@@ -514,7 +569,7 @@ export default function MeetPage() {
     const seekTo = pct * musicDuration
 
     if (musicPlaying && musicSourceRef.current) {
-      musicSourceRef.current.stop()
+      stopCurrentSource()
       const ctx = audioCtxRef.current
       const track = playlist[currentTrackIndex]
       const source = ctx.createBufferSource()
@@ -543,8 +598,7 @@ export default function MeetPage() {
 
     if (index === currentTrackIndex) {
       // Stop current and play next (or prev, or stop)
-      if (musicSourceRef.current) { try { musicSourceRef.current.stop() } catch {} }
-      musicSourceRef.current = null
+      stopCurrentSource()
       if (updated.length === 0) {
         setCurrentTrackIndex(-1)
         setMusicPlaying(false)
@@ -698,6 +752,132 @@ export default function MeetPage() {
     }
   }
 
+  // ─── Recording ──────────────────────────────────────────────────────────
+
+  function startRecording() {
+    setShowTopicInput(true)
+  }
+
+  function confirmStartRecording() {
+    setShowTopicInput(false)
+    setSummaryError('')
+    setMeetingSummary(null)
+    setProcessingState('')
+
+    const { ctx, stream } = createRecordingMixer(
+      localStreamRef.current,
+      remoteAudioStreamRef.current,
+    )
+    recordingMixerCtxRef.current = ctx
+
+    const recorder = createMeetRecorder(stream)
+    recorderRef.current = recorder
+    recorder.start()
+
+    recordingStartRef.current = Date.now()
+    recordingPausedTimeRef.current = 0
+    setRecordingTime(0)
+    setIsRecording(true)
+    setIsPaused(false)
+
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingTime(Math.floor((Date.now() - recordingStartRef.current - recordingPausedTimeRef.current) / 1000))
+    }, 500)
+  }
+
+  function toggleRecordingPause() {
+    if (!recorderRef.current) return
+    if (isPaused) {
+      recorderRef.current.resume()
+      recordingStartRef.current = Date.now() - (recordingTime * 1000)
+      recordingPausedTimeRef.current = 0
+      setIsPaused(false)
+    } else {
+      recorderRef.current.pause()
+      recordingPausedTimeRef.current += Date.now() - recordingStartRef.current - (recordingTime * 1000)
+      setIsPaused(true)
+    }
+  }
+
+  async function stopRecording() {
+    if (!recorderRef.current) return
+
+    clearInterval(recordingTimerRef.current)
+    const durationSeconds = recordingTime
+
+    const blob = await recorderRef.current.stop()
+    setIsRecording(false)
+    setIsPaused(false)
+
+    if (recordingMixerCtxRef.current) {
+      recordingMixerCtxRef.current.close()
+      recordingMixerCtxRef.current = null
+    }
+    recorderRef.current = null
+
+    // Process: transcribe → summarize → save
+    try {
+      setProcessingState('transcribing')
+      const transcript = await transcribeAudio(blob)
+
+      if (transcript === '[No speech detected]') {
+        setProcessingState('error')
+        setSummaryError('No speech detected in the recording.')
+        return
+      }
+
+      setProcessingState('summarizing')
+      const summary = await summarizeMeeting(transcript, meetingTopic)
+
+      // Save to Supabase if logged in
+      if (user) {
+        setProcessingState('saving')
+        await saveRecording({
+          userId: user.id,
+          roomId,
+          topic: meetingTopic || null,
+          durationSeconds,
+          transcript,
+          summary,
+        })
+      }
+
+      setProcessingState('done')
+      setMeetingSummary({ ...summary, transcript })
+    } catch (err) {
+      console.error('Recording processing error:', err)
+      setProcessingState('error')
+      setSummaryError(err.message || 'Processing failed')
+    }
+  }
+
+  function copySummaryText() {
+    if (!meetingSummary) return
+    const lines = [
+      `# ${meetingSummary.title}`,
+      '',
+      meetingSummary.summary,
+      '',
+      '## Key Points',
+      ...meetingSummary.keyPoints.map(p => `- ${p}`),
+    ]
+    if (meetingSummary.actionItems?.length) {
+      lines.push('', '## Action Items', ...meetingSummary.actionItems.map(a => `- [ ] ${a}`))
+    }
+    if (meetingSummary.decisions?.length) {
+      lines.push('', '## Decisions', ...meetingSummary.decisions.map(d => `- ${d}`))
+    }
+    navigator.clipboard.writeText(lines.join('\n'))
+    setSummaryCopied(true)
+    setTimeout(() => setSummaryCopied(false), 2000)
+  }
+
+  function dismissSummary() {
+    setMeetingSummary(null)
+    setProcessingState('')
+    setSummaryError('')
+  }
+
   // ─── Media toggles ───────────────────────────────────────────────────────
 
   function toggleVideo() {
@@ -717,6 +897,14 @@ export default function MeetPage() {
   function hangUp() {
     cleanup()
     window.location.href = '/meet'
+  }
+
+  function unlockAudio() {
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.play().then(() => {
+        setAudioBlocked(false)
+      }).catch(() => {})
+    }
   }
 
   function copyRoomId() {
@@ -840,12 +1028,23 @@ export default function MeetPage() {
         </div>
       </div>
 
+      {/* Audio blocked banner */}
+      {audioBlocked && peerConnected && (
+        <button
+          onClick={unlockAudio}
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-sm font-medium transition-colors"
+        >
+          <FaMicrophone size={14} />
+          Click here to enable audio
+        </button>
+      )}
+
       {/* Video area + Playlist panel */}
       <div className="flex-1 flex min-h-0">
         {/* Video */}
         <div className="flex-1 flex items-center justify-center gap-4 p-4 relative">
           <div className="flex-1 h-full relative rounded-2xl overflow-hidden bg-gray-800 flex items-center justify-center">
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
             {!peerConnected && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <p className="text-gray-500 text-lg">Waiting for peer to join...</p>
@@ -1077,7 +1276,7 @@ export default function MeetPage() {
           )}
 
           {/* Playlist panel toggle */}
-          {playlist.length > 0 && (
+          {(playlist.length > 0 || (user && savedPlaylists.length > 0)) && (
             <button
               onClick={() => setShowPlaylistPanel(p => !p)}
               className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
@@ -1105,6 +1304,44 @@ export default function MeetPage() {
         >
           {videoEnabled ? <FaVideo size={18} /> : <FaVideoSlash size={18} />}
         </button>
+
+        {/* Recording controls */}
+        {!isRecording ? (
+          <button
+            onClick={startRecording}
+            disabled={!!processingState && processingState !== 'done' && processingState !== 'error'}
+            className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white transition-colors"
+            title="Start recording"
+          >
+            <FaCircle size={18} className="text-red-400" />
+          </button>
+        ) : (
+          <>
+            {/* Pause/Resume */}
+            <button
+              onClick={toggleRecordingPause}
+              className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+              title={isPaused ? 'Resume recording' : 'Pause recording'}
+            >
+              {isPaused ? <FaPlay size={18} className="text-red-400" /> : <FaPause size={18} className="text-yellow-400" />}
+            </button>
+            {/* Stop */}
+            <button
+              onClick={stopRecording}
+              className="p-4 rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors"
+              title="Stop recording"
+            >
+              <FaStop size={18} />
+            </button>
+            {/* Timer */}
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-900/40 border border-red-700/50">
+              <div className={`w-2.5 h-2.5 rounded-full bg-red-500 ${isPaused ? '' : 'animate-pulse'}`} />
+              <span className="text-sm font-mono text-red-300">{formatTime(recordingTime)}</span>
+              {isPaused && <span className="text-xs text-yellow-400">PAUSED</span>}
+            </div>
+          </>
+        )}
+
         <button
           onClick={hangUp}
           className="p-4 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors"
@@ -1113,8 +1350,154 @@ export default function MeetPage() {
         </button>
       </div>
 
-      {/* Hidden audio element for remote music stream */}
-      <audio ref={remoteAudioRef} autoPlay />
+      {/* Topic input modal */}
+      {showTopicInput && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl border border-gray-700">
+            <h3 className="text-white font-semibold mb-1">Start Recording</h3>
+            <p className="text-gray-400 text-sm mb-4">Optionally set a meeting topic for better summaries.</p>
+            <input
+              type="text"
+              value={meetingTopic}
+              onChange={(e) => setMeetingTopic(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && confirmStartRecording()}
+              placeholder="Meeting topic (optional)"
+              className="w-full px-4 py-2.5 rounded-xl bg-gray-700 border border-gray-600 text-white placeholder-gray-500 outline-none focus:border-primary-500 mb-4"
+              autoFocus
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowTopicInput(false); setMeetingTopic('') }}
+                className="flex-1 px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStartRecording}
+                className="flex-1 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <FaCircle size={10} /> Record
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Processing state overlay */}
+      {(processingState && processingState !== 'done' && processingState !== 'error') && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-2xl p-8 w-full max-w-sm mx-4 shadow-2xl border border-gray-700 text-center">
+            <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-white font-medium">
+              {processingState === 'transcribing' && 'Transcribing audio...'}
+              {processingState === 'summarizing' && 'Generating summary...'}
+              {processingState === 'saving' && 'Saving to database...'}
+            </p>
+            <p className="text-gray-400 text-sm mt-1">This may take a moment</p>
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {processingState === 'error' && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl border border-red-700/50">
+            <h3 className="text-red-400 font-semibold mb-2">Processing Failed</h3>
+            <p className="text-gray-300 text-sm mb-4">{summaryError}</p>
+            <button
+              onClick={dismissSummary}
+              className="w-full px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Meeting summary overlay */}
+      {processingState === 'done' && meetingSummary && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-lg max-h-[80vh] shadow-2xl border border-gray-700 flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-gray-700">
+              <h3 className="text-white font-semibold text-lg">{meetingSummary.title}</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={copySummaryText}
+                  className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                  title="Copy as Markdown"
+                >
+                  {summaryCopied ? <FaCheck className="text-green-400" size={14} /> : <FaCopy size={14} />}
+                </button>
+                <button
+                  onClick={dismissSummary}
+                  className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                >
+                  <FaTimes size={14} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Summary */}
+              <p className="text-gray-300 text-sm leading-relaxed">{meetingSummary.summary}</p>
+
+              {/* Key Points */}
+              {meetingSummary.keyPoints?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Key Points</h4>
+                  <ul className="space-y-1.5">
+                    {meetingSummary.keyPoints.map((p, i) => (
+                      <li key={i} className="text-sm text-gray-300 flex gap-2">
+                        <span className="text-primary-400 mt-0.5 flex-shrink-0">&#8226;</span>
+                        {p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Action Items */}
+              {meetingSummary.actionItems?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Action Items</h4>
+                  <ul className="space-y-1.5">
+                    {meetingSummary.actionItems.map((a, i) => (
+                      <li key={i} className="text-sm text-gray-300 flex gap-2">
+                        <span className="text-yellow-400 mt-0.5 flex-shrink-0">&#9744;</span>
+                        {a}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Decisions */}
+              {meetingSummary.decisions?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Decisions</h4>
+                  <ul className="space-y-1.5">
+                    {meetingSummary.decisions.map((d, i) => (
+                      <li key={i} className="text-sm text-gray-300 flex gap-2">
+                        <span className="text-green-400 mt-0.5 flex-shrink-0">&#10003;</span>
+                        {d}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Transcript (collapsible) */}
+              <details className="group">
+                <summary className="text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-300">
+                  Full Transcript
+                </summary>
+                <pre className="mt-2 text-xs text-gray-400 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto bg-gray-900 rounded-lg p-3">
+                  {meetingSummary.transcript}
+                </pre>
+              </details>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .mirror { transform: scaleX(-1); }

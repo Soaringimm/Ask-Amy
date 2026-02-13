@@ -1,15 +1,206 @@
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const PORT = 3100;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const rooms = new Map(); // roomId -> Set<socketId>
 
+// Gemini clients
+let genAI = null;
+if (GEMINI_API_KEY) {
+  genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+}
+
+// Helper: collect request body as Buffer
+function collectBody(req, maxBytes = 50 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error('Body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// Helper: parse multipart/form-data to extract file and fields
+function parseMultipart(buf, contentType) {
+  const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
+  if (!boundaryMatch) throw new Error('No boundary found');
+  const boundary = '--' + boundaryMatch[1];
+  const parts = [];
+  const str = buf.toString('binary');
+  const segments = str.split(boundary).slice(1); // skip preamble
+  for (const seg of segments) {
+    if (seg.startsWith('--')) break; // end boundary
+    const headerEnd = seg.indexOf('\r\n\r\n');
+    if (headerEnd === -1) continue;
+    const headers = seg.substring(0, headerEnd);
+    const body = seg.substring(headerEnd + 4, seg.length - 2); // strip trailing \r\n
+    const nameMatch = headers.match(/name="([^"]+)"/);
+    const filenameMatch = headers.match(/filename="([^"]+)"/);
+    const ctMatch = headers.match(/Content-Type:\s*([^\r\n]+)/i);
+    if (nameMatch) {
+      parts.push({
+        name: nameMatch[1],
+        filename: filenameMatch?.[1],
+        contentType: ctMatch?.[1],
+        data: filenameMatch ? Buffer.from(body, 'binary') : body,
+      });
+    }
+  }
+  return parts;
+}
+
+// Helper: send JSON response
+function sendJson(res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(JSON.stringify(data));
+}
+
+// POST /api/meet/transcribe — receive audio, return transcript
+async function handleTranscribe(req, res) {
+  if (!genAI) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured' });
+
+  try {
+    const body = await collectBody(req);
+    const ct = req.headers['content-type'] || '';
+
+    let audioData, mimeType;
+    if (ct.includes('multipart/form-data')) {
+      const parts = parseMultipart(body, ct);
+      const filePart = parts.find(p => p.filename);
+      if (!filePart) return sendJson(res, 400, { error: 'No audio file in request' });
+      audioData = filePart.data;
+      mimeType = filePart.contentType || 'audio/webm';
+    } else {
+      audioData = body;
+      mimeType = ct || 'audio/webm';
+    }
+
+    console.log(`[transcribe] audio size=${audioData.length}, mime=${mimeType}`);
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType,
+          data: audioData.toString('base64'),
+        },
+      },
+      {
+        text: `Transcribe this audio recording of a meeting conversation.
+Rules:
+- Output ONLY the transcript text, no headers or labels
+- If multiple speakers are distinguishable, label them as "Speaker 1:", "Speaker 2:", etc.
+- If the language is not English, transcribe in the original language
+- Ignore background music or non-speech sounds
+- If no speech is detected, respond with exactly: [No speech detected]`,
+      },
+    ]);
+
+    const transcript = result.response.text().trim();
+    console.log(`[transcribe] done, length=${transcript.length}`);
+    sendJson(res, 200, { transcript });
+  } catch (err) {
+    console.error('[transcribe] error:', err.message);
+    sendJson(res, 500, { error: err.message });
+  }
+}
+
+// POST /api/meet/summarize — receive transcript + topic, return structured summary
+async function handleSummarize(req, res) {
+  if (!genAI) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured' });
+
+  try {
+    const body = await collectBody(req);
+    const { transcript, topic } = JSON.parse(body.toString());
+
+    if (!transcript) return sendJson(res, 400, { error: 'transcript is required' });
+
+    console.log(`[summarize] transcript length=${transcript.length}, topic=${topic || '(none)'}`);
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContent([
+      {
+        text: `You are a meeting notes assistant. Given the following meeting transcript${topic ? ` about "${topic}"` : ''}, produce a structured summary in JSON format.
+
+Output ONLY valid JSON with this exact structure:
+{
+  "title": "Brief meeting title",
+  "summary": "2-3 sentence overview of the meeting",
+  "keyPoints": ["point 1", "point 2", ...],
+  "actionItems": ["action 1", "action 2", ...],
+  "decisions": ["decision 1", "decision 2", ...]
+}
+
+Rules:
+- If the transcript is in a non-English language, write the summary in that same language
+- If the transcript contains "[No speech detected]" or is very short, return minimal content
+- Keep each array item concise (one sentence)
+- actionItems should be specific and actionable
+- If no action items or decisions exist, use empty arrays
+
+Transcript:
+${transcript}`,
+      },
+    ]);
+
+    const text = result.response.text().trim();
+    // Extract JSON from response (handle markdown code blocks)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return sendJson(res, 500, { error: 'Failed to parse summary response' });
+    }
+    const summary = JSON.parse(jsonMatch[0]);
+    console.log(`[summarize] done, title=${summary.title}`);
+    sendJson(res, 200, { summary });
+  } catch (err) {
+    console.error('[summarize] error:', err.message);
+    sendJson(res, 500, { error: err.message });
+  }
+}
+
 const httpServer = createServer((req, res) => {
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    });
+    res.end();
+    return;
+  }
+
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
     return;
   }
+
+  if (req.method === 'POST' && req.url === '/api/meet/transcribe') {
+    handleTranscribe(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/meet/summarize') {
+    handleSummarize(req, res);
+    return;
+  }
+
   res.writeHead(404);
   res.end();
 });
