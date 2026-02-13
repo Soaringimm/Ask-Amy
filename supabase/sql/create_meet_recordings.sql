@@ -21,6 +21,11 @@ CREATE POLICY "Users can insert own recordings"
   ON aa_meet_recordings FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+CREATE POLICY "Users can update own recordings"
+  ON aa_meet_recordings FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 CREATE POLICY "Users can delete own recordings"
   ON aa_meet_recordings FOR DELETE
   USING (auth.uid() = user_id);
