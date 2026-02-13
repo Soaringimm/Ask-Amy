@@ -863,6 +863,9 @@ export default function MeetPage() {
       setEditingRecording(record)
       setProcessingState('done')
       setMeetingSummary({ ...record.summary, transcript: '', _recordId: record.id })
+
+      // Start polling for completion
+      pollRecordingStatus(record.id)
     } catch (err) {
       console.error('Failed to save recording:', err)
       setProcessingState('error')
@@ -916,6 +919,41 @@ export default function MeetPage() {
     setProcessingState('done')
     setIsEditing(false)
     setEditForm(null)
+
+    // If still processing, start polling for completion
+    if (rec.summary?.status === 'processing') {
+      pollRecordingStatus(rec.id)
+    }
+  }
+
+  async function pollRecordingStatus(recordId) {
+    const poll = async () => {
+      try {
+        const { data } = await supabase
+          .from('aa_meet_recordings')
+          .select('*')
+          .eq('id', recordId)
+          .single()
+        if (!data) return
+
+        if (data.summary?.status !== 'processing') {
+          // Done or error — update everything
+          setRecordings(prev => prev.map(r => r.id === data.id ? data : r))
+          setEditingRecording(prev => prev?.id === data.id ? data : prev)
+          setMeetingSummary(prev => {
+            if (prev?._recordId === data.id) {
+              return { ...data.summary, transcript: data.transcript || '', _recordId: data.id }
+            }
+            return prev
+          })
+          return // stop polling
+        }
+
+        // Still processing, poll again in 3s
+        setTimeout(poll, 3000)
+      } catch { /* ignore */ }
+    }
+    setTimeout(poll, 3000)
   }
 
   function startEditing() {
