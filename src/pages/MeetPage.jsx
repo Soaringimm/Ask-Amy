@@ -13,7 +13,7 @@ import {
 } from '../lib/playlistStorage'
 import {
   createRecordingMixer, createMeetRecorder,
-  transcribeAudio, summarizeMeeting, saveRecording,
+  saveAndProcessRecording,
   getRecordings, updateRecording, deleteRecording,
 } from '../lib/meetRecording'
 
@@ -828,44 +828,45 @@ export default function MeetPage() {
     }
     recorderRef.current = null
 
-    // Process: transcribe → summarize → save
-    try {
-      setProcessingState('transcribing')
-      const transcript = await transcribeAudio(blob)
-
-      if (transcript === '[No speech detected]') {
-        setProcessingState('error')
-        setSummaryError('No speech detected in the recording.')
-        return
-      }
-
-      setProcessingState('summarizing')
-      const summary = await summarizeMeeting(transcript, meetingTopic)
-
-      // Save to Supabase if logged in
-      let savedRecord = null
-      if (user) {
-        setProcessingState('saving')
-        savedRecord = await saveRecording({
-          userId: user.id,
-          roomId,
-          topic: meetingTopic || null,
-          durationSeconds,
-          transcript,
-          summary,
-        })
-      }
-
-      setProcessingState('done')
-      setMeetingSummary({ ...summary, transcript })
-      if (savedRecord) {
-        setEditingRecording(savedRecord)
-        fetchRecordings()
-      }
-    } catch (err) {
-      console.error('Recording processing error:', err)
+    if (!user) {
       setProcessingState('error')
-      setSummaryError(err.message || 'Processing failed')
+      setSummaryError('Please log in to save recordings.')
+      return
+    }
+
+    // Save pending record immediately, process async in background
+    try {
+      const record = await saveAndProcessRecording({
+        userId: user.id,
+        roomId,
+        topic: meetingTopic || null,
+        durationSeconds,
+        audioBlob: blob,
+        onUpdate: (updated) => {
+          // Background processing completed — update state if this recording is still being viewed
+          setRecordings(prev => prev.map(r => r.id === updated.id ? updated : r))
+          setEditingRecording(prev => prev?.id === updated.id ? updated : prev)
+          if (updated.summary?.status === 'done') {
+            setMeetingSummary(prev => {
+              // Only update if we're still looking at this recording
+              if (prev?._recordId === updated.id) {
+                return { ...updated.summary, transcript: updated.transcript, _recordId: updated.id }
+              }
+              return prev
+            })
+          }
+        },
+      })
+
+      // Add to recordings list immediately
+      setRecordings(prev => [record, ...prev])
+      setEditingRecording(record)
+      setProcessingState('done')
+      setMeetingSummary({ ...record.summary, transcript: '', _recordId: record.id })
+    } catch (err) {
+      console.error('Failed to save recording:', err)
+      setProcessingState('error')
+      setSummaryError(err.message || 'Failed to save recording')
     }
   }
 
@@ -911,7 +912,7 @@ export default function MeetPage() {
 
   function openRecording(rec) {
     setEditingRecording(rec)
-    setMeetingSummary({ ...rec.summary, transcript: rec.transcript })
+    setMeetingSummary({ ...rec.summary, transcript: rec.transcript || '', _recordId: rec.id })
     setProcessingState('done')
     setIsEditing(false)
     setEditForm(null)
@@ -1485,23 +1486,8 @@ export default function MeetPage() {
         </div>
       )}
 
-      {/* Processing state overlay */}
-      {(processingState && processingState !== 'done' && processingState !== 'error') && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-2xl p-8 w-full max-w-sm mx-4 shadow-2xl border border-gray-700 text-center">
-            <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-white font-medium">
-              {processingState === 'transcribing' && 'Transcribing audio...'}
-              {processingState === 'summarizing' && 'Generating summary...'}
-              {processingState === 'saving' && 'Saving to database...'}
-            </p>
-            <p className="text-gray-400 text-sm mt-1">This may take a moment</p>
-          </div>
-        </div>
-      )}
-
-      {/* Error state */}
-      {processingState === 'error' && (
+      {/* Error state (save failed, no record created) */}
+      {processingState === 'error' && !meetingSummary && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl border border-red-700/50">
             <h3 className="text-red-400 font-semibold mb-2">Processing Failed</h3>
@@ -1516,7 +1502,7 @@ export default function MeetPage() {
         </div>
       )}
 
-      {/* Meeting summary overlay — view / edit mode */}
+      {/* Meeting summary overlay — processing / view / edit mode */}
       {processingState === 'done' && meetingSummary && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 rounded-2xl w-full max-w-lg max-h-[80vh] shadow-2xl border border-gray-700 flex flex-col">
@@ -1529,10 +1515,20 @@ export default function MeetPage() {
                   className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-white font-semibold text-lg outline-none focus:border-primary-500 mr-3"
                 />
               ) : (
-                <h3 className="text-white font-semibold text-lg flex-1 min-w-0 truncate">{meetingSummary.title}</h3>
+                <h3 className="text-white font-semibold text-lg flex-1 min-w-0 truncate">
+                  {meetingSummary?.status === 'processing' && (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-primary-400 animate-pulse" />
+                      Processing...
+                    </span>
+                  )}
+                  {meetingSummary?.status === 'error' && 'Error'}
+                  {meetingSummary?.status === 'done' && meetingSummary.title}
+                  {!meetingSummary?.status && meetingSummary?.title}
+                </h3>
               )}
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                {!isEditing && (
+                {!isEditing && meetingSummary?.status === 'done' && (
                   <>
                     <button
                       onClick={copySummaryText}
@@ -1589,7 +1585,38 @@ export default function MeetPage() {
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {isEditing ? (
+              {/* Processing state */}
+              {meetingSummary?.status === 'processing' && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mb-4" />
+                  <p className="text-white font-medium">Processing recording...</p>
+                  <p className="text-gray-400 text-sm mt-1">Transcribing and generating summary</p>
+                  <button
+                    onClick={dismissSummary}
+                    className="mt-4 px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm transition-colors"
+                  >
+                    Close (processing continues in background)
+                  </button>
+                </div>
+              )}
+
+              {/* Error from background processing */}
+              {meetingSummary?.status === 'error' && (
+                <div className="py-8">
+                  <h4 className="text-red-400 font-semibold mb-2">Processing Failed</h4>
+                  <p className="text-gray-300 text-sm mb-4">{meetingSummary.error || 'Unknown error'}</p>
+                  {editingRecording && (
+                    <button
+                      onClick={handleDeleteRecording}
+                      className="px-4 py-2 rounded-xl bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm transition-colors"
+                    >
+                      Delete this recording
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {meetingSummary?.status === 'done' && isEditing && (
                 <>
                   {/* Edit: Summary */}
                   <div>
@@ -1642,7 +1669,9 @@ export default function MeetPage() {
                     />
                   </div>
                 </>
-              ) : (
+              )}
+
+              {meetingSummary?.status === 'done' && !isEditing && (
                 <>
                   {/* View: Summary */}
                   <p className="text-gray-300 text-sm leading-relaxed">{meetingSummary.summary}</p>
@@ -1729,7 +1758,17 @@ export default function MeetPage() {
                       onClick={() => { setShowRecordings(false); openRecording(rec) }}
                       className="w-full text-left px-5 py-3 hover:bg-gray-700/50 transition-colors"
                     >
-                      <p className="text-sm text-white font-medium truncate">{rec.summary?.title || rec.topic || 'Untitled'}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-white font-medium truncate flex-1">
+                          {rec.summary?.status === 'done' ? (rec.summary?.title || rec.topic || 'Untitled') : (rec.topic || 'Untitled')}
+                        </p>
+                        {rec.summary?.status === 'processing' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] bg-primary-600/20 text-primary-300 flex-shrink-0">Processing</span>
+                        )}
+                        {rec.summary?.status === 'error' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-600/20 text-red-400 flex-shrink-0">Failed</span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-3 mt-1">
                         <span className="text-xs text-gray-500">{new Date(rec.created_at).toLocaleDateString()}</span>
                         <span className="text-xs text-gray-500">{formatTime(rec.duration_seconds)}</span>

@@ -69,6 +69,24 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+// Retry wrapper for Gemini API calls (handles 429)
+async function callWithRetry(fn, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err.message?.includes('429') || err.message?.includes('Resource exhausted');
+      if (is429 && attempt < maxRetries) {
+        const delay = (attempt + 1) * 5000; // 5s, 10s
+        console.log(`[retry] 429 hit, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // POST /api/meet/transcribe — receive audio, return transcript
 async function handleTranscribe(req, res) {
   if (!genAI) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured' });
@@ -91,24 +109,26 @@ async function handleTranscribe(req, res) {
 
     console.log(`[transcribe] audio size=${audioData.length}, mime=${mimeType}`);
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType,
-          data: audioData.toString('base64'),
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+    const result = await callWithRetry(() =>
+      model.generateContent([
+        {
+          inlineData: {
+            mimeType,
+            data: audioData.toString('base64'),
+          },
         },
-      },
-      {
-        text: `Transcribe this audio recording of a meeting conversation.
+        {
+          text: `Transcribe this audio recording of a meeting conversation.
 Rules:
 - Output ONLY the transcript text, no headers or labels
 - If multiple speakers are distinguishable, label them as "Speaker 1:", "Speaker 2:", etc.
 - If the language is not English, transcribe in the original language
 - Ignore background music or non-speech sounds
 - If no speech is detected, respond with exactly: [No speech detected]`,
-      },
-    ]);
+        },
+      ])
+    );
 
     const transcript = result.response.text().trim();
     console.log(`[transcribe] done, length=${transcript.length}`);
@@ -131,10 +151,11 @@ async function handleSummarize(req, res) {
 
     console.log(`[summarize] transcript length=${transcript.length}, topic=${topic || '(none)'}`);
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const result = await model.generateContent([
-      {
-        text: `You are a meeting notes assistant. Given the following meeting transcript${topic ? ` about "${topic}"` : ''}, produce a structured summary in JSON format.
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+    const result = await callWithRetry(() =>
+      model.generateContent([
+        {
+          text: `You are a meeting notes assistant. Given the following meeting transcript${topic ? ` about "${topic}"` : ''}, produce a structured summary in JSON format.
 
 Output ONLY valid JSON with this exact structure:
 {
@@ -154,8 +175,9 @@ Rules:
 
 Transcript:
 ${transcript}`,
-      },
-    ]);
+        },
+      ])
+    );
 
     const text = result.response.text().trim();
     // Extract JSON from response (handle markdown code blocks)

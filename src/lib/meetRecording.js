@@ -110,6 +110,66 @@ export async function summarizeMeeting(transcript, topic) {
 }
 
 /**
+ * Save a pending recording (no transcript/summary yet), then process in background.
+ * Returns the saved record immediately. Calls onUpdate when processing completes/fails.
+ */
+export async function saveAndProcessRecording({ userId, roomId, topic, durationSeconds, audioBlob, onUpdate }) {
+  // 1. Save pending record immediately
+  const { data: record, error } = await supabase
+    .from('aa_meet_recordings')
+    .insert({
+      user_id: userId,
+      room_id: roomId,
+      topic,
+      duration_seconds: durationSeconds,
+      summary: { status: 'processing', title: topic || 'Processing...', keyPoints: [], actionItems: [], decisions: [], summary: '' },
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  // 2. Process in background (not awaited by caller)
+  processInBackground(record.id, audioBlob, topic, onUpdate)
+
+  return record
+}
+
+async function processInBackground(recordId, audioBlob, topic, onUpdate) {
+  try {
+    // Transcribe
+    const transcript = await transcribeAudio(audioBlob)
+
+    if (transcript === '[No speech detected]') {
+      const updated = await updateRecording(recordId, {
+        transcript,
+        summary: { status: 'done', title: topic || 'No speech', summary: 'No speech was detected in this recording.', keyPoints: [], actionItems: [], decisions: [] },
+      })
+      onUpdate?.(updated)
+      return
+    }
+
+    // Summarize
+    const summary = await summarizeMeeting(transcript, topic)
+
+    // Save completed result
+    const updated = await updateRecording(recordId, {
+      transcript,
+      summary: { ...summary, status: 'done' },
+    })
+    onUpdate?.(updated)
+  } catch (err) {
+    console.error('Background processing error:', err)
+    try {
+      const updated = await updateRecording(recordId, {
+        summary: { status: 'error', error: err.message, title: topic || 'Error', summary: '', keyPoints: [], actionItems: [], decisions: [] },
+      })
+      onUpdate?.(updated)
+    } catch { /* ignore update failure */ }
+  }
+}
+
+/**
  * Save recording metadata to Supabase.
  */
 export async function saveRecording({ userId, roomId, topic, durationSeconds, transcript, summary }) {
