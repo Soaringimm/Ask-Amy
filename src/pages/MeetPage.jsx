@@ -1499,8 +1499,8 @@ export default function MeetPage() {
 
         {/* Right side actions */}
         <div className="flex items-center gap-3">
-          {/* Recording History */}
-          {user && recordings.length > 0 && (
+          {/* Recording History - 只有创建者可见 */}
+          {!urlRoomId && user && recordings.length > 0 && (
             <button
               onClick={() => { setShowRecordings(true); fetchRecordings() }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-slate-700/50 text-slate-400 hover:text-white transition-all duration-200 border border-transparent hover:border-slate-700/50"
@@ -1905,60 +1905,64 @@ export default function MeetPage() {
           {/* Divider */}
           <div className="w-px h-10 bg-slate-700/50 mx-2" />
 
-          {/* Recording Controls */}
-          {!isRecording ? (
-            <button
-              onClick={startRecording}
-              disabled={!!processingState && processingState !== 'done' && processingState !== 'error'}
-              className="group relative p-5 rounded-2xl bg-slate-700/80 hover:bg-slate-600/80 disabled:bg-slate-800/50 disabled:text-slate-600 text-white transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-110 disabled:transform-none"
-              title="开始录制"
-            >
-              <FaCircle size={20} className="text-red-400" />
-              <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                开始录制
-              </span>
-            </button>
-          ) : (
+          {/* Recording Controls - 只有创建者可以录音 */}
+          {!urlRoomId && (
             <>
-              {/* Pause/Resume */}
-              <button
-                onClick={toggleRecordingPause}
-                className="group relative p-5 rounded-2xl bg-slate-700/80 hover:bg-slate-600/80 text-white transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-110"
-                title={isPaused ? '继续录制' : '暂停录制'}
-              >
-                {isPaused ? <FaPlay size={20} className="text-green-400" /> : <FaPause size={20} className="text-yellow-400" />}
-                <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                  {isPaused ? '继续录制' : '暂停录制'}
-                </span>
-              </button>
-
-              {/* Stop Recording */}
-              <button
-                onClick={stopRecording}
-                className="group relative p-5 rounded-2xl bg-red-600/90 hover:bg-red-700/90 text-white transition-all duration-300 shadow-lg shadow-red-600/30 hover:shadow-xl transform hover:scale-110"
-                title="停止录制"
-              >
-                <FaStop size={20} />
-                <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                  停止录制
-                </span>
-              </button>
-
-              {/* Recording Timer - 优雅设计 */}
-              <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-red-900/60 border-2 border-red-700/50 shadow-lg">
-                <div className={`w-3 h-3 rounded-full bg-red-500 ${isPaused ? '' : 'animate-pulse'}`} />
-                <span className="text-base font-mono font-bold text-white tabular-nums">{formatTime(recordingTime)}</span>
-                {isPaused && (
-                  <span className="text-xs font-bold text-yellow-400 px-2 py-0.5 rounded-full bg-yellow-400/20">
-                    暂停
+              {!isRecording ? (
+                <button
+                  onClick={startRecording}
+                  disabled={!!processingState && processingState !== 'done' && processingState !== 'error'}
+                  className="group relative p-5 rounded-2xl bg-slate-700/80 hover:bg-slate-600/80 disabled:bg-slate-800/50 disabled:text-slate-600 text-white transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-110 disabled:transform-none"
+                  title="开始录制"
+                >
+                  <FaCircle size={20} className="text-red-400" />
+                  <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                    开始录制
                   </span>
-                )}
-              </div>
+                </button>
+              ) : (
+                <>
+                  {/* Pause/Resume */}
+                  <button
+                    onClick={toggleRecordingPause}
+                    className="group relative p-5 rounded-2xl bg-slate-700/80 hover:bg-slate-600/80 text-white transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-110"
+                    title={isPaused ? '继续录制' : '暂停录制'}
+                  >
+                    {isPaused ? <FaPlay size={20} className="text-green-400" /> : <FaPause size={20} className="text-yellow-400" />}
+                    <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      {isPaused ? '继续录制' : '暂停录制'}
+                    </span>
+                  </button>
+
+                  {/* Stop Recording */}
+                  <button
+                    onClick={stopRecording}
+                    className="group relative p-5 rounded-2xl bg-red-600/90 hover:bg-red-700/90 text-white transition-all duration-300 shadow-lg shadow-red-600/30 hover:shadow-xl transform hover:scale-110"
+                    title="停止录制"
+                  >
+                    <FaStop size={20} />
+                    <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      停止录制
+                    </span>
+                  </button>
+
+                  {/* Recording Timer - 优雅设计 */}
+                  <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-red-900/60 border-2 border-red-700/50 shadow-lg">
+                    <div className={`w-3 h-3 rounded-full bg-red-500 ${isPaused ? '' : 'animate-pulse'}`} />
+                    <span className="text-base font-mono font-bold text-white tabular-nums">{formatTime(recordingTime)}</span>
+                    {isPaused && (
+                      <span className="text-xs font-bold text-yellow-400 px-2 py-0.5 rounded-full bg-yellow-400/20">
+                        暂停
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </>
           )}
 
-          {/* Processing Indicator - 处理状态指示器 */}
-          {!isRecording && processingState && processingState !== '' && (
+          {/* Processing Indicator - 处理状态指示器（只有创建者可见） */}
+          {!urlRoomId && !isRecording && processingState && processingState !== '' && (
             <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-black/60 backdrop-blur-sm border-2 border-white/10 shadow-lg">
               {processingState === 'processing' && (
                 <>
