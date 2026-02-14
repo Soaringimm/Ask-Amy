@@ -45,6 +45,9 @@ function loadSocketIO() {
   })
 }
 
+// PiP constants
+const PIP_W = 224, PIP_H = 160, PIP_MARGIN = 16
+
 export default function MeetPage() {
   const { id: urlRoomId } = useParams()
   // Connection state
@@ -157,6 +160,13 @@ export default function MeetPage() {
   const ytManagedItemsRef = useRef([])
   const ytTitlesFetchingRef = useRef(new Set()) // track which videoIds are being fetched
 
+  // PiP drag state
+  const [localPipPos, setLocalPipPos] = useState(null)   // {x,y} or null=default
+  const [remotePipPos, setRemotePipPos] = useState(null)
+  const mainVideoAreaRef = useRef(null)
+  const draggingPipRef = useRef(null)       // 'local' | 'remote' | null
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
+
   // Sync refs with state
   useEffect(() => { playlistRef.current = playlist }, [playlist])
   useEffect(() => { currentTrackIndexRef.current = currentTrackIndex }, [currentTrackIndex])
@@ -166,6 +176,78 @@ export default function MeetPage() {
   // Derived values
   const currentTrack = playlist[currentTrackIndex] || null
   const musicName = currentTrack?.name || ''
+
+  // ─── PiP drag handlers ────────────────────────────────────────────────────
+  function onPipPointerDown(e, pipId) {
+    e.preventDefault()
+    draggingPipRef.current = pipId
+    const el = mainVideoAreaRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const pos = pipId === 'local' ? localPipPos : remotePipPos
+    if (!pos) return
+    dragOffsetRef.current = { x: e.clientX - rect.left - pos.x, y: e.clientY - rect.top - pos.y }
+    const onMove = (ev) => {
+      if (!draggingPipRef.current) return
+      const r = el.getBoundingClientRect()
+      let nx = ev.clientX - r.left - dragOffsetRef.current.x
+      let ny = ev.clientY - r.top - dragOffsetRef.current.y
+      nx = Math.max(0, Math.min(nx, r.width - PIP_W))
+      ny = Math.max(0, Math.min(ny, r.height - PIP_H))
+      const setter = draggingPipRef.current === 'local' ? setLocalPipPos : setRemotePipPos
+      setter({ x: nx, y: ny })
+    }
+    const onUp = () => {
+      draggingPipRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  function getPipStyle(pipId) {
+    const pos = pipId === 'local' ? localPipPos : remotePipPos
+    if (!pos) {
+      // Fallback for local PiP before mount effect sets position
+      if (pipId === 'local') {
+        return { position: 'absolute', bottom: 32, right: 32, width: PIP_W, height: PIP_H, zIndex: 20, touchAction: 'none', userSelect: 'none' }
+      }
+      return {}
+    }
+    return {
+      position: 'absolute',
+      left: pos.x, top: pos.y,
+      width: PIP_W, height: PIP_H,
+      zIndex: pipId === 'local' ? 20 : 15,
+      transition: draggingPipRef.current === pipId ? 'none' : 'left 0.3s, top 0.3s',
+      cursor: 'grab',
+      touchAction: 'none',
+      userSelect: 'none',
+    }
+  }
+
+  // Reset PiP positions when ytMode changes
+  useEffect(() => {
+    const el = mainVideoAreaRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    if (ytMode) {
+      setRemotePipPos({ x: PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
+      setLocalPipPos({ x: r.width - PIP_W - PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
+    } else {
+      setRemotePipPos(null)
+      setLocalPipPos({ x: r.width - PIP_W - PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
+    }
+  }, [ytMode])
+
+  // Initialize local PiP position on mount
+  useEffect(() => {
+    const el = mainVideoAreaRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setLocalPipPos({ x: r.width - PIP_W - PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
+  }, [])
 
   // ─── ResizeObserver: auto-resize YT player when container changes ────────
   useEffect(() => {
@@ -2111,9 +2193,16 @@ export default function MeetPage() {
       {/* Video area + Playlist panel */}
       <div className="flex-1 flex min-h-0 relative z-0">
         {/* Main Video Area */}
-        <div className="flex-1 flex items-center justify-center p-6 relative">
-          {/* Remote Video Container - 优雅设计 */}
-          <div className="flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30">
+        <div ref={mainVideoAreaRef} className="flex-1 flex items-center justify-center p-6 relative">
+          {/* Remote Video Container — full-screen normally, PiP when ytMode */}
+          <div
+            className={ytMode
+              ? 'rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container'
+              : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'
+            }
+            style={ytMode ? getPipStyle('remote') : undefined}
+            onPointerDown={ytMode ? (e) => onPipPointerDown(e, 'remote') : undefined}
+          >
             <video
               ref={remoteVideoRef}
               autoPlay
@@ -2121,16 +2210,7 @@ export default function MeetPage() {
               muted
               className="w-full h-full object-cover"
             />
-
-            {/* YouTube player overlay — covers remote video when ytMode */}
-            <div
-              ref={ytContainerRef}
-              className={ytMode ? 'absolute inset-0 z-10 bg-black' : 'hidden'}
-              style={!isYtHost ? { pointerEvents: 'none' } : undefined}
-            >
-              <div id="yt-player-embed"></div>
-            </div>
-            {!peerConnected && (
+            {!peerConnected && !ytMode && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-sm">
                 <div className="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4 animate-pulse">
                   <FaVideo className="text-3xl text-slate-400" />
@@ -2139,17 +2219,37 @@ export default function MeetPage() {
                 <p className="text-slate-500 text-sm">分享会议 ID 邀请参与者</p>
               </div>
             )}
-
+            {/* Label for remote PiP */}
+            {ytMode && (
+              <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent">
+                <span className="text-xs text-white font-semibold">对方</span>
+              </div>
+            )}
             {/* Overlay gradient for depth */}
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />
+            {!ytMode && (
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />
+            )}
           </div>
 
-          {/* Local Video (Picture-in-Picture) - 精致设计 */}
-          <div className={`absolute bottom-8 right-8 w-64 h-48 rounded-2xl overflow-hidden shadow-2xl z-20 transform hover:scale-105 transition-all duration-300 group ${
-            isScreenSharing
-              ? 'border-2 border-primary-500/80 shadow-primary-500/30'
-              : 'border-2 border-slate-600/50'
-          }`}>
+          {/* YouTube player — sibling of remote container, shown only in ytMode */}
+          <div
+            ref={ytContainerRef}
+            className={ytMode ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl' : 'hidden'}
+            style={!isYtHost ? { pointerEvents: 'none' } : undefined}
+          >
+            <div id="yt-player-embed"></div>
+          </div>
+
+          {/* Local Video (Picture-in-Picture) — draggable */}
+          <div
+            className={`rounded-2xl overflow-hidden shadow-2xl group ${
+              isScreenSharing
+                ? 'border-2 border-primary-500/80 shadow-primary-500/30'
+                : 'border-2 border-slate-600/50'
+            }`}
+            style={getPipStyle('local')}
+            onPointerDown={(e) => onPipPointerDown(e, 'local')}
+          >
             <video
               ref={localVideoRef}
               autoPlay
@@ -2161,7 +2261,7 @@ export default function MeetPage() {
             <div className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-white font-semibold">
-                  {isScreenSharing ? '🖥️ 你的屏幕' : '👤 你'}
+                  {isScreenSharing ? '你的屏幕' : '你'}
                 </span>
                 {isScreenSharing && (
                   <span className="flex items-center gap-1 text-xs text-green-400 font-semibold">
