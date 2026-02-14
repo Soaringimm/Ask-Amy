@@ -47,6 +47,10 @@ function loadSocketIO() {
 
 // PiP constants
 const PIP_W = 224, PIP_H = 160, PIP_MARGIN = 16
+const PIP_MIN_W = 120, PIP_MIN_H = 86     // 最小缩放
+const PIP_MAX_W = 448, PIP_MAX_H = 320    // 最大缩放（2x）
+const PIP_BAR_W = 100, PIP_BAR_H = 32     // 最小化条尺寸
+const PIP_RATIO = PIP_W / PIP_H           // 1.4 宽高比
 
 export default function MeetPage() {
   const { id: urlRoomId } = useParams()
@@ -167,6 +171,13 @@ export default function MeetPage() {
   const draggingPipRef = useRef(null)       // 'local' | 'remote' | null
   const dragOffsetRef = useRef({ x: 0, y: 0 })
 
+  // PiP resize + minimize state
+  const [localPipSize, setLocalPipSize] = useState({ w: PIP_W, h: PIP_H })
+  const [remotePipSize, setRemotePipSize] = useState({ w: PIP_W, h: PIP_H })
+  const [localPipMin, setLocalPipMin] = useState(false)
+  const [remotePipMin, setRemotePipMin] = useState(false)
+  const resizingPipRef = useRef(null)       // 'local' | 'remote' | null
+
   // Sync refs with state
   useEffect(() => { playlistRef.current = playlist }, [playlist])
   useEffect(() => { currentTrackIndexRef.current = currentTrackIndex }, [currentTrackIndex])
@@ -186,14 +197,18 @@ export default function MeetPage() {
     const rect = el.getBoundingClientRect()
     const pos = pipId === 'local' ? localPipPos : remotePipPos
     if (!pos) return
+    const size = pipId === 'local' ? localPipSize : remotePipSize
+    const isMin = pipId === 'local' ? localPipMin : remotePipMin
+    const curW = isMin ? PIP_BAR_W : size.w
+    const curH = isMin ? PIP_BAR_H : size.h
     dragOffsetRef.current = { x: e.clientX - rect.left - pos.x, y: e.clientY - rect.top - pos.y }
     const onMove = (ev) => {
       if (!draggingPipRef.current) return
       const r = el.getBoundingClientRect()
       let nx = ev.clientX - r.left - dragOffsetRef.current.x
       let ny = ev.clientY - r.top - dragOffsetRef.current.y
-      nx = Math.max(0, Math.min(nx, r.width - PIP_W))
-      ny = Math.max(0, Math.min(ny, r.height - PIP_H))
+      nx = Math.max(0, Math.min(nx, r.width - curW))
+      ny = Math.max(0, Math.min(ny, r.height - curH))
       const setter = draggingPipRef.current === 'local' ? setLocalPipPos : setRemotePipPos
       setter({ x: nx, y: ny })
     }
@@ -206,8 +221,46 @@ export default function MeetPage() {
     window.addEventListener('pointerup', onUp)
   }
 
+  function onResizePointerDown(e, pipId) {
+    e.preventDefault()
+    e.stopPropagation()
+    resizingPipRef.current = pipId
+    const el = mainVideoAreaRef.current
+    if (!el) return
+    const size = pipId === 'local' ? localPipSize : remotePipSize
+    const startX = e.clientX
+    const startW = size.w
+    const setSizer = pipId === 'local' ? setLocalPipSize : setRemotePipSize
+    const setPos = pipId === 'local' ? setLocalPipPos : setRemotePipPos
+    const onMove = (ev) => {
+      if (!resizingPipRef.current) return
+      const dx = ev.clientX - startX
+      let newW = Math.max(PIP_MIN_W, Math.min(PIP_MAX_W, startW + dx))
+      let newH = Math.round(newW / PIP_RATIO)
+      // clamp height too
+      if (newH > PIP_MAX_H) { newH = PIP_MAX_H; newW = Math.round(newH * PIP_RATIO) }
+      if (newH < PIP_MIN_H) { newH = PIP_MIN_H; newW = Math.round(newH * PIP_RATIO) }
+      setSizer({ w: newW, h: newH })
+      // Clamp position so PiP stays in bounds
+      const r = el.getBoundingClientRect()
+      setPos(prev => prev ? {
+        x: Math.min(prev.x, r.width - newW),
+        y: Math.min(prev.y, r.height - newH),
+      } : prev)
+    }
+    const onUp = () => {
+      resizingPipRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   function getPipStyle(pipId) {
     const pos = pipId === 'local' ? localPipPos : remotePipPos
+    const size = pipId === 'local' ? localPipSize : remotePipSize
+    const isMin = pipId === 'local' ? localPipMin : remotePipMin
     if (!pos) {
       // Fallback for local PiP before mount effect sets position
       if (pipId === 'local') {
@@ -215,19 +268,21 @@ export default function MeetPage() {
       }
       return {}
     }
+    const isDragging = draggingPipRef.current === pipId || resizingPipRef.current === pipId
     return {
       position: 'absolute',
       left: pos.x, top: pos.y,
-      width: PIP_W, height: PIP_H,
+      width: isMin ? PIP_BAR_W : size.w,
+      height: isMin ? PIP_BAR_H : size.h,
       zIndex: pipId === 'local' ? 20 : 15,
-      transition: draggingPipRef.current === pipId ? 'none' : 'left 0.3s, top 0.3s',
+      transition: isDragging ? 'none' : 'all 0.3s',
       cursor: 'grab',
       touchAction: 'none',
       userSelect: 'none',
     }
   }
 
-  // Reset PiP positions when ytMode changes
+  // Reset PiP positions + size/min when ytMode changes
   useEffect(() => {
     const el = mainVideoAreaRef.current
     if (!el) return
@@ -238,7 +293,13 @@ export default function MeetPage() {
     } else {
       setRemotePipPos(null)
       setLocalPipPos({ x: r.width - PIP_W - PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
+      // Reset remote PiP size/min when exiting ytMode
+      setRemotePipSize({ w: PIP_W, h: PIP_H })
+      setRemotePipMin(false)
     }
+    // Also reset local PiP
+    setLocalPipSize({ w: PIP_W, h: PIP_H })
+    setLocalPipMin(false)
   }, [ytMode])
 
   // Initialize local PiP position on mount
@@ -2197,37 +2258,67 @@ export default function MeetPage() {
           {/* Remote Video Container — full-screen normally, PiP when ytMode */}
           <div
             className={ytMode
-              ? 'rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container'
+              ? `rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container group ${remotePipMin ? 'cursor-pointer' : ''}`
               : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'
             }
             style={ytMode ? getPipStyle('remote') : undefined}
-            onPointerDown={ytMode ? (e) => onPipPointerDown(e, 'remote') : undefined}
+            onPointerDown={ytMode && !remotePipMin ? (e) => onPipPointerDown(e, 'remote') : undefined}
+            onClick={ytMode && remotePipMin ? () => setRemotePipMin(false) : undefined}
           >
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            {!peerConnected && !ytMode && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-sm">
-                <div className="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4 animate-pulse">
-                  <FaVideo className="text-3xl text-slate-400" />
-                </div>
-                <p className="text-slate-300 text-xl font-semibold mb-2">等待对方加入...</p>
-                <p className="text-slate-500 text-sm">分享会议 ID 邀请参与者</p>
+            {ytMode && remotePipMin ? (
+              /* Minimized bar */
+              <div className="w-full h-full flex items-center justify-center bg-slate-800 rounded-2xl px-3">
+                <span className="text-xs text-white font-semibold truncate">对方</span>
               </div>
-            )}
-            {/* Label for remote PiP */}
-            {ytMode && (
-              <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent">
-                <span className="text-xs text-white font-semibold">对方</span>
-              </div>
-            )}
-            {/* Overlay gradient for depth */}
-            {!ytMode && (
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />
+            ) : (
+              <>
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                />
+                {!peerConnected && !ytMode && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-sm">
+                    <div className="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4 animate-pulse">
+                      <FaVideo className="text-3xl text-slate-400" />
+                    </div>
+                    <p className="text-slate-300 text-xl font-semibold mb-2">等待对方加入...</p>
+                    <p className="text-slate-500 text-sm">分享会议 ID 邀请参与者</p>
+                  </div>
+                )}
+                {/* Label for remote PiP */}
+                {ytMode && (
+                  <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent">
+                    <span className="text-xs text-white font-semibold">对方</span>
+                  </div>
+                )}
+                {/* Minimize button — top-right, hover only (ytMode PiP only) */}
+                {ytMode && (
+                  <button
+                    className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => { e.stopPropagation(); setRemotePipMin(true) }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    title="最小化"
+                  >−</button>
+                )}
+                {/* Resize handle — bottom-right, hover only (ytMode PiP only) */}
+                {ytMode && (
+                  <div
+                    className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                    onPointerDown={(e) => onResizePointerDown(e, 'remote')}
+                  >
+                    <svg viewBox="0 0 16 16" className="w-full h-full text-white/70">
+                      <path d="M14 14L8 14L14 8Z" fill="currentColor" />
+                    </svg>
+                  </div>
+                )}
+                {/* Overlay gradient for depth */}
+                {!ytMode && (
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />
+                )}
+              </>
             )}
           </div>
 
@@ -2240,43 +2331,73 @@ export default function MeetPage() {
             <div id="yt-player-embed"></div>
           </div>
 
-          {/* Local Video (Picture-in-Picture) — draggable */}
+          {/* Local Video (Picture-in-Picture) — draggable + resizable + minimizable */}
           <div
             className={`rounded-2xl overflow-hidden shadow-2xl group ${
+              localPipMin ? 'cursor-pointer' : ''
+            } ${
               isScreenSharing
                 ? 'border-2 border-primary-500/80 shadow-primary-500/30'
                 : 'border-2 border-slate-600/50'
             }`}
             style={getPipStyle('local')}
-            onPointerDown={(e) => onPipPointerDown(e, 'local')}
+            onPointerDown={localPipMin ? undefined : (e) => onPipPointerDown(e, 'local')}
+            onClick={localPipMin ? () => setLocalPipMin(false) : undefined}
           >
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`w-full h-full object-cover ${isScreenSharing ? '' : 'mirror'}`}
-            />
-            {/* Label */}
-            <div className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-white font-semibold">
-                  {isScreenSharing ? '你的屏幕' : '你'}
+            {localPipMin ? (
+              /* Minimized bar */
+              <div className="w-full h-full flex items-center justify-center bg-slate-800 rounded-2xl px-3">
+                <span className="text-xs text-white font-semibold truncate">
+                  {isScreenSharing ? '屏幕' : '你'}
                 </span>
-                {isScreenSharing && (
-                  <span className="flex items-center gap-1 text-xs text-green-400 font-semibold">
-                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                    共享中
-                  </span>
-                )}
               </div>
-            </div>
-            {/* Hover effect */}
-            <div className={`absolute inset-0 ring-2 transition-all duration-300 rounded-2xl ${
-              isScreenSharing
-                ? 'ring-primary-500/50 group-hover:ring-primary-500/80'
-                : 'ring-primary-500/0 group-hover:ring-primary-500/50'
-            }`} />
+            ) : (
+              <>
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover ${isScreenSharing ? '' : 'mirror'}`}
+                />
+                {/* Label */}
+                <div className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-white font-semibold">
+                      {isScreenSharing ? '你的屏幕' : '你'}
+                    </span>
+                    {isScreenSharing && (
+                      <span className="flex items-center gap-1 text-xs text-green-400 font-semibold">
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                        共享中
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {/* Minimize button — top-right, hover only */}
+                <button
+                  className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={(e) => { e.stopPropagation(); setLocalPipMin(true) }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  title="最小化"
+                >−</button>
+                {/* Resize handle — bottom-right, hover only */}
+                <div
+                  className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                  onPointerDown={(e) => onResizePointerDown(e, 'local')}
+                >
+                  <svg viewBox="0 0 16 16" className="w-full h-full text-white/70">
+                    <path d="M14 14L8 14L14 8Z" fill="currentColor" />
+                  </svg>
+                </div>
+                {/* Hover effect */}
+                <div className={`absolute inset-0 ring-2 transition-all duration-300 rounded-2xl pointer-events-none ${
+                  isScreenSharing
+                    ? 'ring-primary-500/50 group-hover:ring-primary-500/80'
+                    : 'ring-primary-500/0 group-hover:ring-primary-500/50'
+                }`} />
+              </>
+            )}
           </div>
         </div>
 
