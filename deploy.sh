@@ -6,6 +6,10 @@ echo "🚀 Starting Ask-Amy deployment..."
 # Navigate to project directory
 cd /home/jacky/apps/Ask-Amy
 
+# Ensure we're on main branch
+echo "🔀 Switching to main branch..."
+git checkout main
+
 # Pull latest changes
 echo "📥 Pulling latest code from GitHub..."
 git pull origin main
