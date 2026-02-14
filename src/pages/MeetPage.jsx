@@ -154,6 +154,7 @@ export default function MeetPage() {
   const ytIgnoreStateRef = useRef(false) // suppress state change events during programmatic control
   const ytManagedPlayingIdxRef = useRef(-1) // which ytManagedItems index is currently playing
   const ytManagedItemsRef = useRef([])
+  const ytTitlesFetchingRef = useRef(new Set()) // track which videoIds are being fetched
 
   // Sync refs with state
   useEffect(() => { playlistRef.current = playlist }, [playlist])
@@ -164,6 +165,30 @@ export default function MeetPage() {
   // Derived values
   const currentTrack = playlist[currentTrackIndex] || null
   const musicName = currentTrack?.name || ''
+
+  // ─── Fetch YouTube playlist track titles via noembed ─────────────────────
+  useEffect(() => {
+    const toFetch = ytPlaylistItems.filter(
+      item => /^Track \d+$/.test(item.title) && !ytTitlesFetchingRef.current.has(item.videoId)
+    )
+    if (toFetch.length === 0) return
+
+    toFetch.forEach(item => ytTitlesFetchingRef.current.add(item.videoId))
+
+    toFetch.forEach(async (item) => {
+      try {
+        const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${item.videoId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.title) {
+            setYtPlaylistItems(prev =>
+              prev.map(p => p.videoId === item.videoId ? { ...p, title: data.title } : p)
+            )
+          }
+        }
+      } catch { /* ignore fetch errors */ }
+    })
+  }, [ytPlaylistItems])
 
   // ─── Auth check ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -992,6 +1017,7 @@ export default function MeetPage() {
     setYtCurrentIndex(-1)
     setYtUrl('')
     setIsYtHost(false)
+    ytTitlesFetchingRef.current.clear()
     if (socketRef.current) {
       socketRef.current.emit('music-sync', { type: 'yt-stop' })
     }
