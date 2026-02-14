@@ -757,6 +757,12 @@ export default function MeetPage() {
       setYtDuration(p.getDuration?.() || 0)
       const data = p.getVideoData?.()
       if (data?.title) setYtVideoTitle(data.title)
+      // Update playlist info (may not be available in onReady for playlist-only URLs)
+      const plItems = p.getPlaylist?.()
+      if (plItems && plItems.length > 0) {
+        setYtPlaylistItems(plItems.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
+        setYtCurrentIndex(p.getPlaylistIndex?.() ?? 0)
+      }
       startYtTimeUpdater()
       // Sync to peer
       if (socketRef.current) {
@@ -839,6 +845,9 @@ export default function MeetPage() {
           setYtDuration(player.getDuration?.() || 0)
           const data = player.getVideoData?.()
           if (data?.title) setYtVideoTitle(data.title)
+
+          // Auto-play after loading
+          player.playVideo()
 
           // Tell peer to load the same URL
           if (socketRef.current) {
@@ -1872,8 +1881,8 @@ export default function MeetPage() {
         </button>
       )}
 
-      {/* Hidden YouTube player container */}
-      <div ref={ytContainerRef} className="hidden">
+      {/* YouTube player container — offscreen but in DOM (YT API needs it visible) */}
+      <div ref={ytContainerRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0, pointerEvents: 'none' }}>
         <div id="yt-player-embed"></div>
       </div>
 

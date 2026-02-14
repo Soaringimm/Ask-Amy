@@ -101,8 +101,8 @@ export function createYTPlayer(elementId, { videoId, listId, onReady, onStateCha
   }
 
   return new window.YT.Player(elementId, {
-    height: '0',
-    width: '0',
+    height: '1',
+    width: '1',
     videoId: videoId || undefined,
     playerVars,
     events: {
