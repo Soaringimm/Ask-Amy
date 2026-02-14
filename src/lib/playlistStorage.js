@@ -52,22 +52,25 @@ export async function deleteAudioFile(name) {
 
 // ─── Supabase: playlist metadata CRUD ───────────────────────────────────────
 
-export async function savePlaylist(userId, name, songs) {
+export async function savePlaylist(userId, name, songs, type = 'local') {
   const { data, error } = await supabase
     .from('aa_meet_playlists')
-    .insert({ user_id: userId, name, songs })
+    .insert({ user_id: userId, name, songs, type })
     .select()
     .single()
   if (error) throw error
   return data
 }
 
-export async function getPlaylists(userId) {
-  const { data, error } = await supabase
+export async function getPlaylists(userId, type) {
+  let query = supabase
     .from('aa_meet_playlists')
     .select('*')
     .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
+  if (type) {
+    query = query.eq('type', type)
+  }
+  const { data, error } = await query.order('updated_at', { ascending: false })
   if (error) throw error
   return data || []
 }

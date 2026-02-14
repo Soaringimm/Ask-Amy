@@ -106,6 +106,15 @@ export default function MeetPage() {
   const [savedPlaylists, setSavedPlaylists] = useState([])
   const [playlistName, setPlaylistName] = useState('')
   const [savingPlaylist, setSavingPlaylist] = useState(false)
+
+  // Playlist panel tab: 'local' | 'youtube'
+  const [activeTab, setActiveTab] = useState('local')
+  // YouTube playlist management (saved playlists)
+  const [savedYtPlaylists, setSavedYtPlaylists] = useState([])
+  const [ytPlaylistName, setYtPlaylistName] = useState('')
+  const [savingYtPlaylist, setSavingYtPlaylist] = useState(false)
+  // YouTube current playlist items for add/remove management
+  const [ytManagedItems, setYtManagedItems] = useState([]) // [{ url, title, videoId, listId }]
   const [videoResolution, setVideoResolution] = useState('fhd') // 'sd' | 'hd' | 'fhd' - 默认全高清
 
   // Refs
@@ -143,11 +152,14 @@ export default function MeetPage() {
   const ytContainerRef = useRef(null)    // hidden div for YT player
   const ytTimerRef = useRef(null)        // setInterval for time updates
   const ytIgnoreStateRef = useRef(false) // suppress state change events during programmatic control
+  const ytManagedPlayingIdxRef = useRef(-1) // which ytManagedItems index is currently playing
+  const ytManagedItemsRef = useRef([])
 
   // Sync refs with state
   useEffect(() => { playlistRef.current = playlist }, [playlist])
   useEffect(() => { currentTrackIndexRef.current = currentTrackIndex }, [currentTrackIndex])
   useEffect(() => { musicPlayingRef.current = musicPlaying }, [musicPlaying])
+  useEffect(() => { ytManagedItemsRef.current = ytManagedItems }, [ytManagedItems])
 
   // Derived values
   const currentTrack = playlist[currentTrackIndex] || null
@@ -160,6 +172,7 @@ export default function MeetPage() {
         setUser(data.user)
         fetchUserRole(data.user.id)
         fetchSavedPlaylists(data.user.id)
+        fetchSavedYtPlaylists(data.user.id)
         getRecordings(data.user.id).then(setRecordings).catch(() => {})
       }
     })
@@ -169,10 +182,12 @@ export default function MeetPage() {
       if (u) {
         fetchUserRole(u.id)
         fetchSavedPlaylists(u.id)
+        fetchSavedYtPlaylists(u.id)
         getRecordings(u.id).then(setRecordings).catch(() => {})
       } else {
         setUserRole(null)
         setSavedPlaylists([])
+        setSavedYtPlaylists([])
         setRecordings([])
       }
     })
@@ -203,8 +218,15 @@ export default function MeetPage() {
 
   async function fetchSavedPlaylists(userId) {
     try {
-      const data = await getPlaylists(userId)
+      const data = await getPlaylists(userId, 'local')
       setSavedPlaylists(data)
+    } catch { /* ignore */ }
+  }
+
+  async function fetchSavedYtPlaylists(userId) {
+    try {
+      const data = await getPlaylists(userId, 'youtube')
+      setSavedYtPlaylists(data)
     } catch { /* ignore */ }
   }
 
@@ -517,6 +539,9 @@ export default function MeetPage() {
     if (!files.length) return
 
     setIsMusicHost(true)
+    setActiveTab('local')
+    // Stop YouTube if playing
+    if (ytMode) stopYouTube()
     const ctx = ensureAudioContext()
 
     const newTracks = []
@@ -759,9 +784,27 @@ export default function MeetPage() {
       if (data?.title) setYtVideoTitle(data.title)
       // Update playlist info (may not be available in onReady for playlist-only URLs)
       const plItems = p.getPlaylist?.()
+      const plIdx = p.getPlaylistIndex?.() ?? 0
       if (plItems && plItems.length > 0) {
-        setYtPlaylistItems(plItems.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
-        setYtCurrentIndex(p.getPlaylistIndex?.() ?? 0)
+        setYtPlaylistItems(prev => {
+          const updated = plItems.map((vid, i) => {
+            const existing = prev.find(item => item.videoId === vid)
+            return { videoId: vid, title: existing?.title || `Track ${i + 1}` }
+          })
+          // Update current track title from player data
+          if (data?.title && plIdx >= 0 && plIdx < updated.length) {
+            updated[plIdx] = { ...updated[plIdx], title: data.title }
+          }
+          return updated
+        })
+        setYtCurrentIndex(plIdx)
+      }
+      // Sync resolved title back to ytManagedItems
+      if (data?.title && ytManagedPlayingIdxRef.current >= 0) {
+        const mIdx = ytManagedPlayingIdxRef.current
+        setYtManagedItems(prev => prev.map((item, i) =>
+          i === mIdx ? { ...item, title: data.title } : item
+        ))
       }
       startYtTimeUpdater()
       // Sync to peer
@@ -802,6 +845,7 @@ export default function MeetPage() {
     setYtLoading(true)
     setIsYtHost(true)
     setYtMode(true)
+    setActiveTab('youtube')
 
     // Pause local music if playing
     if (musicPlaying) {
@@ -890,6 +934,12 @@ export default function MeetPage() {
     }
   }
 
+  function ytPlayAt(index) {
+    const p = ytPlayerRef.current
+    if (!p) return
+    p.playVideoAt(index)
+  }
+
   function seekYt(e) {
     const p = ytPlayerRef.current
     if (!p) return
@@ -952,6 +1002,7 @@ export default function MeetPage() {
     setYtMode(true)
     setIsYtHost(false)
     setYtLoading(true)
+    setActiveTab('youtube')
 
     // Pause local music
     if (musicPlaying) {
@@ -1026,6 +1077,7 @@ export default function MeetPage() {
         setCurrentTrackIndex(msg.index)
         setMusicDuration(msg.tracks[msg.index]?.duration || 0)
         setIsMusicHost(false)
+        setActiveTab('local')
         break
       case 'track-change':
         setCurrentTrackIndex(msg.index)
@@ -1116,7 +1168,7 @@ export default function MeetPage() {
         duration: t.duration,
         order: i,
       }))
-      await savePlaylist(user.id, playlistName.trim(), songs)
+      await savePlaylist(user.id, playlistName.trim(), songs, 'local')
       setPlaylistName('')
       await fetchSavedPlaylists(user.id)
     } catch (err) {
@@ -1125,8 +1177,110 @@ export default function MeetPage() {
     setSavingPlaylist(false)
   }
 
+  // ─── YouTube playlist CRUD ─────────────────────────────────────────────
+
+  function addYtItem(url) {
+    const parsed = parseYouTubeURL(url)
+    if (!parsed) {
+      setError('Invalid YouTube URL')
+      return
+    }
+    setYtManagedItems(prev => [...prev, {
+      url,
+      title: parsed.videoId || 'YouTube Video',
+      videoId: parsed.videoId,
+      listId: parsed.listId,
+    }])
+    setYtUrl('')
+  }
+
+  function removeYtItem(index) {
+    setYtManagedItems(prev => prev.filter((_, i) => i !== index))
+  }
+
+  function playYtItem(index) {
+    const item = ytManagedItems[index]
+    if (!item) return
+    // Stop local music if playing
+    if (musicPlaying) {
+      stopCurrentSource()
+      setMusicPlaying(false)
+    }
+    ytManagedPlayingIdxRef.current = index
+    setActiveTab('youtube')
+    loadYouTube(item.url)
+  }
+
+  async function handleSaveYtPlaylist() {
+    if (!user || !ytPlaylistName.trim() || !ytManagedItems.length) return
+    setSavingYtPlaylist(true)
+    try {
+      const songs = ytManagedItems.map((item, i) => ({
+        url: item.url,
+        title: item.title,
+        videoId: item.videoId,
+        listId: item.listId,
+        order: i,
+      }))
+      await savePlaylist(user.id, ytPlaylistName.trim(), songs, 'youtube')
+      setYtPlaylistName('')
+      await fetchSavedYtPlaylists(user.id)
+    } catch (err) {
+      console.error('Failed to save YouTube playlist', err)
+    }
+    setSavingYtPlaylist(false)
+  }
+
+  function handleLoadYtPlaylist(pl) {
+    const items = pl.songs.map(s => ({
+      url: s.url,
+      title: s.title || s.videoId || 'YouTube Video',
+      videoId: s.videoId,
+      listId: s.listId,
+    }))
+    setYtManagedItems(items)
+    // Auto-play the first item
+    if (items.length > 0) {
+      setActiveTab('youtube')
+      loadYouTube(items[0].url)
+    }
+  }
+
+  async function handleDeleteYtPlaylist(id) {
+    try {
+      await deletePlaylistApi(id)
+      setSavedYtPlaylists(prev => prev.filter(p => p.id !== id))
+    } catch (err) {
+      console.error('Failed to delete YouTube playlist', err)
+    }
+  }
+
+  // Tab switching logic
+  function switchTab(tab) {
+    if (tab === activeTab) return
+    if (tab === 'local') {
+      // Stop YouTube if playing
+      if (ytMode) stopYouTube()
+    } else {
+      // Stop local music if playing
+      if (musicPlaying) {
+        stopCurrentSource()
+        const ctx = audioCtxRef.current
+        if (ctx) {
+          const elapsed = ctx.currentTime - musicStartTimeRef.current + musicOffsetRef.current
+          musicOffsetRef.current = elapsed
+        }
+        setMusicPlaying(false)
+      }
+    }
+    setActiveTab(tab)
+  }
+
   async function handleLoadPlaylist(pl) {
     setIsMusicHost(true)
+    setActiveTab('local')
+    // Stop YouTube if playing
+    if (ytMode) stopYouTube()
     const ctx = ensureAudioContext()
 
     const tracks = []
@@ -1961,183 +2115,328 @@ export default function MeetPage() {
         {/* Playlist side panel */}
         {showPlaylistPanel && (
           <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
+            {/* Header with tabs */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-              <h3 className="text-sm font-semibold text-white">Playlist</h3>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => switchTab('local')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'local'
+                      ? 'bg-primary-600 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  <FaMusic size={10} />
+                  Local Music
+                </button>
+                <button
+                  onClick={() => switchTab('youtube')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'youtube'
+                      ? 'bg-red-600 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                  }`}
+                >
+                  <FaYoutube size={10} />
+                  YouTube
+                </button>
+              </div>
               <button onClick={() => setShowPlaylistPanel(false)} className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white">
                 <FaTimes size={14} />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* Now Playing */}
-              <div className="p-3">
-                <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">Now Playing</p>
-                {playlist.length === 0 ? (
-                  <p className="text-xs text-gray-500">No tracks loaded</p>
-                ) : (
-                  <div className="space-y-1">
-                    {playlist.map((track, i) => (
-                      <div
-                        key={`${track.name}-${i}`}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${
-                          i === currentTrackIndex
-                            ? 'bg-primary-600/20 text-primary-300'
-                            : 'text-gray-300 hover:bg-gray-700/50'
-                        }`}
-                        onClick={() => isMusicHost && track.buffer && playTrackAtIndex(i)}
-                      >
-                        <span className="text-xs w-5 text-right flex-shrink-0">
-                          {i === currentTrackIndex && musicPlaying ? (
-                            <span className="text-primary-400">&#9654;</span>
-                          ) : (
-                            <span className="text-gray-500">{i + 1}.</span>
-                          )}
-                        </span>
-                        <span className={`text-xs truncate flex-1 ${!track.buffer ? 'italic text-gray-500' : ''}`}>
-                          {track.name}
-                          {!track.buffer && ' (missing)'}
-                        </span>
-                        <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(track.duration)}</span>
-                        {isMusicHost && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); removeTrack(i) }}
-                            className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+              {activeTab === 'local' ? (
+                <>
+                  {/* Now Playing */}
+                  <div className="p-3">
+                    <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">Now Playing</p>
+                    {playlist.length === 0 ? (
+                      <p className="text-xs text-gray-500">No tracks loaded</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {playlist.map((track, i) => (
+                          <div
+                            key={`${track.name}-${i}`}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${
+                              i === currentTrackIndex
+                                ? 'bg-primary-600/20 text-primary-300'
+                                : 'text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                            onClick={() => isMusicHost && track.buffer && playTrackAtIndex(i)}
                           >
-                            <FaTimes size={10} />
-                          </button>
-                        )}
+                            <span className="text-xs w-5 text-right flex-shrink-0">
+                              {i === currentTrackIndex && musicPlaying ? (
+                                <span className="text-primary-400">&#9654;</span>
+                              ) : (
+                                <span className="text-gray-500">{i + 1}.</span>
+                              )}
+                            </span>
+                            <span className={`text-xs truncate flex-1 ${!track.buffer ? 'italic text-gray-500' : ''}`}>
+                              {track.name}
+                              {!track.buffer && ' (missing)'}
+                            </span>
+                            <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(track.duration)}</span>
+                            {isMusicHost && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); removeTrack(i) }}
+                                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+                              >
+                                <FaTimes size={10} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+
+                    {/* Add more songs */}
+                    <label className="mt-2 flex items-center gap-1.5 cursor-pointer text-xs text-primary-400 hover:text-primary-300 transition-colors">
+                      <FaPlus size={10} />
+                      Add more songs
+                      <input
+                        ref={addMoreInputRef}
+                        type="file"
+                        accept="audio/*"
+                        multiple
+                        onChange={handleMusicFiles}
+                        className="hidden"
+                      />
+                    </label>
                   </div>
-                )}
 
-                {/* Add more songs */}
-                {isMusicHost && (
-                  <label className="mt-2 flex items-center gap-1.5 cursor-pointer text-xs text-primary-400 hover:text-primary-300 transition-colors">
-                    <FaPlus size={10} />
-                    Add more songs
-                    <input
-                      ref={addMoreInputRef}
-                      type="file"
-                      accept="audio/*"
-                      multiple
-                      onChange={handleMusicFiles}
-                      className="hidden"
-                    />
-                  </label>
-                )}
-              </div>
+                  {/* Saved Playlists (Local) */}
+                  <div className="border-t border-gray-700 p-3">
+                    <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">
+                      Saved Playlists
+                      {!user && <span className="ml-1 text-gray-500 normal-case">(login required)</span>}
+                    </p>
 
-              {/* YouTube */}
-              <div className="border-t border-gray-700 p-3">
-                <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider flex items-center gap-1.5">
-                  <FaYoutube className="text-red-500" size={12} />
-                  YouTube
-                </p>
-
-                {ytMode ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
-                      <FaYoutube className="text-red-500 flex-shrink-0" size={14} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-200 truncate">{ytVideoTitle || 'Loading...'}</p>
-                        {ytPlaylistItems.length > 1 && (
-                          <p className="text-[10px] text-gray-500">{ytCurrentIndex + 1}/{ytPlaylistItems.length} tracks</p>
-                        )}
+                    {user && playlist.length > 0 && (
+                      <div className="flex gap-1.5 mb-3">
+                        <input
+                          type="text"
+                          value={playlistName}
+                          onChange={(e) => setPlaylistName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSavePlaylist()}
+                          placeholder="Playlist name..."
+                          className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-primary-500"
+                        />
+                        <button
+                          onClick={handleSavePlaylist}
+                          disabled={!playlistName.trim() || savingPlaylist}
+                          className="px-2 py-1 rounded bg-primary-600 hover:bg-primary-500 disabled:bg-gray-600 text-white text-xs transition-colors"
+                        >
+                          <FaSave size={12} />
+                        </button>
                       </div>
+                    )}
+
+                    {user ? (
+                      savedPlaylists.length === 0 ? (
+                        <p className="text-xs text-gray-500">No saved playlists yet</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {savedPlaylists.map(pl => (
+                            <div key={pl.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-700/40 group">
+                              <FaMusic className="text-gray-500 flex-shrink-0" size={10} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-gray-200 truncate">{pl.name}</p>
+                                <p className="text-[10px] text-gray-500">{pl.songs.length} songs</p>
+                              </div>
+                              <button
+                                onClick={() => handleLoadPlaylist(pl)}
+                                className="px-2 py-0.5 rounded text-[10px] bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+                              >
+                                Load
+                              </button>
+                              <button
+                                onClick={() => handleDeletePlaylist(pl.id)}
+                                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+                              >
+                                <FaTrash size={10} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <a href="/login" className="text-xs text-primary-400 hover:text-primary-300 underline">
+                        Log in to save playlists
+                      </a>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* YouTube Tab */}
+
+                  {/* Now Playing — YouTube playlist tracks */}
+                  {ytMode && (
+                    <div className="p-3">
+                      <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">Now Playing</p>
+                      {ytPlaylistItems.length > 1 ? (
+                        <div className="space-y-1">
+                          {ytPlaylistItems.map((track, i) => (
+                            <div
+                              key={`ytp-${track.videoId}-${i}`}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${
+                                i === ytCurrentIndex
+                                  ? 'bg-red-500/20 text-red-300'
+                                  : 'text-gray-300 hover:bg-gray-700/50'
+                              }`}
+                              onClick={() => isYtHost && ytPlayAt(i)}
+                            >
+                              <span className="text-xs w-5 text-right flex-shrink-0">
+                                {i === ytCurrentIndex && ytPlaying ? (
+                                  <span className="text-red-400">&#9654;</span>
+                                ) : (
+                                  <span className="text-gray-500">{i + 1}.</span>
+                                )}
+                              </span>
+                              <span className="text-xs truncate flex-1">{track.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
+                          <FaYoutube className="text-red-500 flex-shrink-0" size={14} />
+                          <p className="text-xs text-gray-200 truncate flex-1">{ytVideoTitle || 'Loading...'}</p>
+                        </div>
+                      )}
                       {isYtHost && (
                         <button
                           onClick={stopYouTube}
-                          className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
-                          title="Stop YouTube"
+                          className="mt-2 flex items-center gap-1 text-xs text-gray-500 hover:text-red-400 transition-colors"
                         >
-                          <FaTimes size={10} />
+                          <FaStop size={9} />
+                          Stop YouTube
                         </button>
                       )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={ytUrl}
-                      onChange={(e) => setYtUrl(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && ytUrl.trim() && loadYouTube(ytUrl.trim())}
-                      placeholder="Paste YouTube URL..."
-                      className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-red-500/50 placeholder-gray-500"
-                    />
-                    <button
-                      onClick={() => ytUrl.trim() && loadYouTube(ytUrl.trim())}
-                      disabled={!ytUrl.trim() || ytLoading}
-                      className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:bg-gray-600 text-white text-xs transition-colors"
-                    >
-                      {ytLoading ? '...' : <FaPlay size={10} />}
-                    </button>
-                  </div>
-                )}
-              </div>
+                  )}
 
-              {/* Saved Playlists */}
-              <div className="border-t border-gray-700 p-3">
-                <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">
-                  Saved Playlists
-                  {!user && <span className="ml-1 text-gray-500 normal-case">(login required)</span>}
-                </p>
+                  {/* URL list (saveable playlist) */}
+                  <div className={`p-3 ${ytMode ? 'border-t border-gray-700' : ''}`}>
+                    <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">Playlist</p>
 
-                {user && playlist.length > 0 && (
-                  <div className="flex gap-1.5 mb-3">
-                    <input
-                      type="text"
-                      value={playlistName}
-                      onChange={(e) => setPlaylistName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSavePlaylist()}
-                      placeholder="Playlist name..."
-                      className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-primary-500"
-                    />
-                    <button
-                      onClick={handleSavePlaylist}
-                      disabled={!playlistName.trim() || savingPlaylist}
-                      className="px-2 py-1 rounded bg-primary-600 hover:bg-primary-500 disabled:bg-gray-600 text-white text-xs transition-colors"
-                    >
-                      <FaSave size={12} />
-                    </button>
-                  </div>
-                )}
-
-                {user ? (
-                  savedPlaylists.length === 0 ? (
-                    <p className="text-xs text-gray-500">No saved playlists yet</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {savedPlaylists.map(pl => (
-                        <div key={pl.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-700/40 group">
-                          <FaMusic className="text-gray-500 flex-shrink-0" size={10} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-gray-200 truncate">{pl.name}</p>
-                            <p className="text-[10px] text-gray-500">{pl.songs.length} songs</p>
+                    {ytManagedItems.length === 0 ? (
+                      <p className="text-xs text-gray-500">No YouTube items added</p>
+                    ) : (
+                      <div className="space-y-1 mb-3">
+                        {ytManagedItems.map((item, i) => (
+                          <div
+                            key={`yt-${item.videoId}-${i}`}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${
+                              ytManagedPlayingIdxRef.current === i && ytMode
+                                ? 'bg-red-500/20 text-red-300'
+                                : 'text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                            onClick={() => playYtItem(i)}
+                          >
+                            <span className="text-xs w-5 text-right flex-shrink-0">
+                              {ytManagedPlayingIdxRef.current === i && ytMode && ytPlaying ? (
+                                <span className="text-red-400">&#9654;</span>
+                              ) : (
+                                <span className="text-gray-500">{i + 1}.</span>
+                              )}
+                            </span>
+                            <span className="text-xs truncate flex-1">{item.title}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); removeYtItem(i) }}
+                              className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+                            >
+                              <FaTimes size={10} />
+                            </button>
                           </div>
-                          <button
-                            onClick={() => handleLoadPlaylist(pl)}
-                            className="px-2 py-0.5 rounded text-[10px] bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
-                          >
-                            Load
-                          </button>
-                          <button
-                            onClick={() => handleDeletePlaylist(pl.id)}
-                            className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
-                          >
-                            <FaTrash size={10} />
-                          </button>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add YouTube URL */}
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={ytUrl}
+                        onChange={(e) => setYtUrl(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && ytUrl.trim() && addYtItem(ytUrl.trim())}
+                        placeholder="Paste YouTube URL..."
+                        className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-red-500/50 placeholder-gray-500"
+                      />
+                      <button
+                        onClick={() => ytUrl.trim() && addYtItem(ytUrl.trim())}
+                        disabled={!ytUrl.trim()}
+                        className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:bg-gray-600 text-white text-xs transition-colors"
+                      >
+                        <FaPlus size={10} />
+                      </button>
                     </div>
-                  )
-                ) : (
-                  <a href="/login" className="text-xs text-primary-400 hover:text-primary-300 underline">
-                    Log in to save playlists
-                  </a>
-                )}
-              </div>
+                  </div>
+
+                  {/* Saved YouTube Playlists */}
+                  <div className="border-t border-gray-700 p-3">
+                    <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">
+                      Saved Playlists
+                      {!user && <span className="ml-1 text-gray-500 normal-case">(login required)</span>}
+                    </p>
+
+                    {user && ytManagedItems.length > 0 && (
+                      <div className="flex gap-1.5 mb-3">
+                        <input
+                          type="text"
+                          value={ytPlaylistName}
+                          onChange={(e) => setYtPlaylistName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveYtPlaylist()}
+                          placeholder="Playlist name..."
+                          className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-red-500"
+                        />
+                        <button
+                          onClick={handleSaveYtPlaylist}
+                          disabled={!ytPlaylistName.trim() || savingYtPlaylist}
+                          className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:bg-gray-600 text-white text-xs transition-colors"
+                        >
+                          <FaSave size={12} />
+                        </button>
+                      </div>
+                    )}
+
+                    {user ? (
+                      savedYtPlaylists.length === 0 ? (
+                        <p className="text-xs text-gray-500">No saved playlists yet</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {savedYtPlaylists.map(pl => (
+                            <div key={pl.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-700/40 group">
+                              <FaYoutube className="text-red-500 flex-shrink-0" size={10} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-gray-200 truncate">{pl.name}</p>
+                                <p className="text-[10px] text-gray-500">{pl.songs.length} items</p>
+                              </div>
+                              <button
+                                onClick={() => handleLoadYtPlaylist(pl)}
+                                className="px-2 py-0.5 rounded text-[10px] bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+                              >
+                                Load
+                              </button>
+                              <button
+                                onClick={() => handleDeleteYtPlaylist(pl.id)}
+                                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"
+                              >
+                                <FaTrash size={10} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <a href="/login" className="text-xs text-primary-400 hover:text-primary-300 underline">
+                        Log in to save playlists
+                      </a>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
