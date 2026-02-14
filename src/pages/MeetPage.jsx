@@ -7,6 +7,7 @@ import {
   FaPlus, FaTimes, FaCircle, FaStop, FaEdit, FaHistory, FaDesktop,
   FaVolumeUp, FaVolumeMute,
 } from 'react-icons/fa'
+import { FaYoutube } from 'react-icons/fa'
 import { supabase } from '../lib/supabase'
 import {
   saveAudioFile, getAudioFile,
@@ -17,6 +18,9 @@ import {
   saveAndProcessRecording,
   getRecordings, updateRecording, deleteRecording,
 } from '../lib/meetRecording'
+import {
+  loadYouTubeAPI, parseYouTubeURL, createYTPlayer, YTState,
+} from '../lib/youtubePlayer'
 
 const SIGNAL_URL = window.location.origin
 const ICE_SERVERS = [
@@ -68,6 +72,18 @@ export default function MeetPage() {
   const [musicDuration, setMusicDuration] = useState(0)
   const [isMusicHost, setIsMusicHost] = useState(false)
   const [showPlaylistPanel, setShowPlaylistPanel] = useState(false)
+
+  // YouTube state
+  const [ytMode, setYtMode] = useState(false)       // true when YouTube is active (replaces local music)
+  const [ytUrl, setYtUrl] = useState('')             // input field
+  const [ytVideoTitle, setYtVideoTitle] = useState('')
+  const [ytPlaying, setYtPlaying] = useState(false)
+  const [ytTime, setYtTime] = useState(0)
+  const [ytDuration, setYtDuration] = useState(0)
+  const [ytPlaylistItems, setYtPlaylistItems] = useState([]) // [{ title, videoId }]
+  const [ytCurrentIndex, setYtCurrentIndex] = useState(-1)
+  const [ytLoading, setYtLoading] = useState(false)
+  const [isYtHost, setIsYtHost] = useState(false)    // who loaded the YouTube URL
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false)
@@ -121,6 +137,12 @@ export default function MeetPage() {
   const currentTrackIndexRef = useRef(-1)
   const musicPlayingRef = useRef(false)
   const addMoreInputRef = useRef(null)
+
+  // YouTube refs
+  const ytPlayerRef = useRef(null)       // YT.Player instance
+  const ytContainerRef = useRef(null)    // hidden div for YT player
+  const ytTimerRef = useRef(null)        // setInterval for time updates
+  const ytIgnoreStateRef = useRef(false) // suppress state change events during programmatic control
 
   // Sync refs with state
   useEffect(() => { playlistRef.current = playlist }, [playlist])
@@ -250,6 +272,10 @@ export default function MeetPage() {
   function cleanup() {
     cancelAnimationFrame(animFrameRef.current)
     stopCurrentSource()
+    // Clean up YouTube
+    clearInterval(ytTimerRef.current)
+    if (ytPlayerRef.current) { try { ytPlayerRef.current.destroy() } catch {} }
+    ytPlayerRef.current = null
     if (audioCtxRef.current) { audioCtxRef.current.close() }
     if (pcRef.current) { pcRef.current.close() }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()) }
@@ -704,6 +730,274 @@ export default function MeetPage() {
     }
   }
 
+  // ─── YouTube functions ────────────────────────────────────────────────────
+
+  function startYtTimeUpdater() {
+    clearInterval(ytTimerRef.current)
+    ytTimerRef.current = setInterval(() => {
+      const p = ytPlayerRef.current
+      if (p && typeof p.getCurrentTime === 'function') {
+        setYtTime(p.getCurrentTime())
+      }
+    }, 500)
+  }
+
+  function stopYtTimeUpdater() {
+    clearInterval(ytTimerRef.current)
+    ytTimerRef.current = null
+  }
+
+  function handleYtStateChange(state) {
+    if (ytIgnoreStateRef.current) return
+    const p = ytPlayerRef.current
+    if (!p) return
+
+    if (state === YTState.PLAYING) {
+      setYtPlaying(true)
+      setYtDuration(p.getDuration?.() || 0)
+      const data = p.getVideoData?.()
+      if (data?.title) setYtVideoTitle(data.title)
+      startYtTimeUpdater()
+      // Sync to peer
+      if (socketRef.current) {
+        socketRef.current.emit('music-sync', {
+          type: 'yt-state',
+          state: 'playing',
+          time: p.getCurrentTime(),
+          title: data?.title || '',
+          duration: p.getDuration?.() || 0,
+          index: p.getPlaylistIndex?.() ?? -1,
+        })
+      }
+    } else if (state === YTState.PAUSED) {
+      setYtPlaying(false)
+      stopYtTimeUpdater()
+      if (socketRef.current) {
+        socketRef.current.emit('music-sync', {
+          type: 'yt-state',
+          state: 'paused',
+          time: p.getCurrentTime(),
+        })
+      }
+    } else if (state === YTState.ENDED) {
+      // Auto-advance happens internally for playlists; for single video just stop
+      setYtPlaying(false)
+      stopYtTimeUpdater()
+    }
+  }
+
+  async function loadYouTube(url) {
+    const parsed = parseYouTubeURL(url)
+    if (!parsed) {
+      setError('Invalid YouTube URL')
+      return
+    }
+
+    setYtLoading(true)
+    setIsYtHost(true)
+    setYtMode(true)
+
+    // Pause local music if playing
+    if (musicPlaying) {
+      stopCurrentSource()
+      const ctx = audioCtxRef.current
+      if (ctx) {
+        const elapsed = ctx.currentTime - musicStartTimeRef.current + musicOffsetRef.current
+        musicOffsetRef.current = elapsed
+      }
+      setMusicPlaying(false)
+    }
+
+    try {
+      await loadYouTubeAPI()
+
+      // Destroy existing player
+      if (ytPlayerRef.current) {
+        ytPlayerRef.current.destroy()
+        ytPlayerRef.current = null
+      }
+
+      // Need a fresh div for the player
+      if (ytContainerRef.current) {
+        ytContainerRef.current.innerHTML = '<div id="yt-player-embed"></div>'
+      }
+
+      const player = createYTPlayer('yt-player-embed', {
+        videoId: parsed.videoId,
+        listId: parsed.listId,
+        onReady: () => {
+          setYtLoading(false)
+          // Get playlist items if available
+          const pl = player.getPlaylist?.()
+          if (pl && pl.length > 0) {
+            setYtPlaylistItems(pl.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
+            setYtCurrentIndex(player.getPlaylistIndex?.() ?? 0)
+          } else {
+            setYtPlaylistItems([])
+            setYtCurrentIndex(0)
+          }
+          setYtDuration(player.getDuration?.() || 0)
+          const data = player.getVideoData?.()
+          if (data?.title) setYtVideoTitle(data.title)
+
+          // Tell peer to load the same URL
+          if (socketRef.current) {
+            socketRef.current.emit('music-sync', {
+              type: 'youtube-load',
+              url: url,
+              videoId: parsed.videoId,
+              listId: parsed.listId,
+            })
+          }
+        },
+        onStateChange: (state) => handleYtStateChange(state),
+        onError: (code) => {
+          console.error('[YT] player error:', code)
+          setYtLoading(false)
+          setError('YouTube playback error')
+        },
+      })
+      ytPlayerRef.current = player
+    } catch (err) {
+      console.error('[YT] load error:', err)
+      setYtLoading(false)
+      setError('Failed to load YouTube player')
+    }
+  }
+
+  function toggleYtPlayback() {
+    const p = ytPlayerRef.current
+    if (!p) return
+    if (ytPlaying) {
+      p.pauseVideo()
+    } else {
+      p.playVideo()
+    }
+  }
+
+  function seekYt(e) {
+    const p = ytPlayerRef.current
+    if (!p) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pct = (e.clientX - rect.left) / rect.width
+    const seekTo = pct * ytDuration
+    ytIgnoreStateRef.current = true
+    p.seekTo(seekTo, true)
+    setYtTime(seekTo)
+    setTimeout(() => { ytIgnoreStateRef.current = false }, 500)
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', {
+        type: 'yt-state',
+        state: 'seek',
+        time: seekTo,
+      })
+    }
+  }
+
+  function ytNextTrack() {
+    const p = ytPlayerRef.current
+    if (!p) return
+    p.nextVideo()
+  }
+
+  function ytPrevTrack() {
+    const p = ytPlayerRef.current
+    if (!p) return
+    if (ytTime > 3) {
+      p.seekTo(0, true)
+      setYtTime(0)
+    } else {
+      p.previousVideo()
+    }
+  }
+
+  function stopYouTube() {
+    if (ytPlayerRef.current) {
+      ytPlayerRef.current.stopVideo()
+      ytPlayerRef.current.destroy()
+      ytPlayerRef.current = null
+    }
+    stopYtTimeUpdater()
+    setYtMode(false)
+    setYtPlaying(false)
+    setYtTime(0)
+    setYtDuration(0)
+    setYtVideoTitle('')
+    setYtPlaylistItems([])
+    setYtCurrentIndex(-1)
+    setYtUrl('')
+    setIsYtHost(false)
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', { type: 'yt-stop' })
+    }
+  }
+
+  // Peer-side: load YouTube player when host sends youtube-load
+  async function handleYtLoad(msg) {
+    setYtMode(true)
+    setIsYtHost(false)
+    setYtLoading(true)
+
+    // Pause local music
+    if (musicPlaying) {
+      stopCurrentSource()
+      setMusicPlaying(false)
+    }
+
+    try {
+      await loadYouTubeAPI()
+      if (ytPlayerRef.current) {
+        ytPlayerRef.current.destroy()
+        ytPlayerRef.current = null
+      }
+      if (ytContainerRef.current) {
+        ytContainerRef.current.innerHTML = '<div id="yt-player-embed"></div>'
+      }
+
+      const player = createYTPlayer('yt-player-embed', {
+        videoId: msg.videoId,
+        listId: msg.listId,
+        onReady: () => {
+          setYtLoading(false)
+          const pl = player.getPlaylist?.()
+          if (pl && pl.length > 0) {
+            setYtPlaylistItems(pl.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
+            setYtCurrentIndex(player.getPlaylistIndex?.() ?? 0)
+          }
+          setYtDuration(player.getDuration?.() || 0)
+          const data = player.getVideoData?.()
+          if (data?.title) setYtVideoTitle(data.title)
+        },
+        onStateChange: (state) => {
+          // Peer mirrors host state; only update UI, don't re-emit
+          const p = ytPlayerRef.current
+          if (!p) return
+          if (state === YTState.PLAYING) {
+            setYtPlaying(true)
+            setYtDuration(p.getDuration?.() || 0)
+            const data = p.getVideoData?.()
+            if (data?.title) setYtVideoTitle(data.title)
+            startYtTimeUpdater()
+          } else if (state === YTState.PAUSED) {
+            setYtPlaying(false)
+            stopYtTimeUpdater()
+          } else if (state === YTState.ENDED) {
+            setYtPlaying(false)
+            stopYtTimeUpdater()
+          }
+        },
+        onError: (code) => {
+          console.error('[YT peer] player error:', code)
+          setYtLoading(false)
+        },
+      })
+      ytPlayerRef.current = player
+    } catch (err) {
+      console.error('[YT peer] load error:', err)
+      setYtLoading(false)
+    }
+  }
+
   // ─── Music sync (peer side) ───────────────────────────────────────────────
 
   function handleMusicSync(msg) {
@@ -744,6 +1038,51 @@ export default function MeetPage() {
         setCurrentTrackIndex(0)
         setMusicDuration(msg.duration)
         setIsMusicHost(false)
+        break
+      // YouTube sync events
+      case 'youtube-load':
+        handleYtLoad(msg)
+        break
+      case 'yt-state': {
+        const p = ytPlayerRef.current
+        if (!p) break
+        ytIgnoreStateRef.current = true
+        if (msg.state === 'playing') {
+          p.seekTo(msg.time, true)
+          p.playVideo()
+          setYtPlaying(true)
+          setYtDuration(msg.duration || ytDuration)
+          if (msg.title) setYtVideoTitle(msg.title)
+          if (msg.index >= 0) setYtCurrentIndex(msg.index)
+          startYtTimeUpdater()
+        } else if (msg.state === 'paused') {
+          p.seekTo(msg.time, true)
+          p.pauseVideo()
+          setYtPlaying(false)
+          setYtTime(msg.time)
+          stopYtTimeUpdater()
+        } else if (msg.state === 'seek') {
+          p.seekTo(msg.time, true)
+          setYtTime(msg.time)
+        }
+        setTimeout(() => { ytIgnoreStateRef.current = false }, 500)
+        break
+      }
+      case 'yt-stop':
+        if (ytPlayerRef.current) {
+          ytPlayerRef.current.stopVideo()
+          ytPlayerRef.current.destroy()
+          ytPlayerRef.current = null
+        }
+        stopYtTimeUpdater()
+        setYtMode(false)
+        setYtPlaying(false)
+        setYtTime(0)
+        setYtDuration(0)
+        setYtVideoTitle('')
+        setYtPlaylistItems([])
+        setYtCurrentIndex(-1)
+        setIsYtHost(false)
         break
     }
   }
@@ -1533,6 +1872,11 @@ export default function MeetPage() {
         </button>
       )}
 
+      {/* Hidden YouTube player container */}
+      <div ref={ytContainerRef} className="hidden">
+        <div id="yt-player-embed"></div>
+      </div>
+
       {/* Video area + Playlist panel */}
       <div className="flex-1 flex min-h-0 relative z-0">
         {/* Main Video Area */}
@@ -1666,6 +2010,55 @@ export default function MeetPage() {
                 )}
               </div>
 
+              {/* YouTube */}
+              <div className="border-t border-gray-700 p-3">
+                <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider flex items-center gap-1.5">
+                  <FaYoutube className="text-red-500" size={12} />
+                  YouTube
+                </p>
+
+                {ytMode ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
+                      <FaYoutube className="text-red-500 flex-shrink-0" size={14} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-200 truncate">{ytVideoTitle || 'Loading...'}</p>
+                        {ytPlaylistItems.length > 1 && (
+                          <p className="text-[10px] text-gray-500">{ytCurrentIndex + 1}/{ytPlaylistItems.length} tracks</p>
+                        )}
+                      </div>
+                      {isYtHost && (
+                        <button
+                          onClick={stopYouTube}
+                          className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+                          title="Stop YouTube"
+                        >
+                          <FaTimes size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={ytUrl}
+                      onChange={(e) => setYtUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && ytUrl.trim() && loadYouTube(ytUrl.trim())}
+                      placeholder="Paste YouTube URL..."
+                      className="flex-1 px-2 py-1 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 outline-none focus:border-red-500/50 placeholder-gray-500"
+                    />
+                    <button
+                      onClick={() => ytUrl.trim() && loadYouTube(ytUrl.trim())}
+                      disabled={!ytUrl.trim() || ytLoading}
+                      className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:bg-gray-600 text-white text-xs transition-colors"
+                    >
+                      {ytLoading ? '...' : <FaPlay size={10} />}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Saved Playlists */}
               <div className="border-t border-gray-700 p-3">
                 <p className="text-xs text-gray-400 mb-2 uppercase tracking-wider">
@@ -1735,80 +2128,145 @@ export default function MeetPage() {
       {/* Music bar */}
       <div className="px-4 py-2 bg-gray-800/80 backdrop-blur border-t border-gray-700">
         <div className="flex items-center gap-3 max-w-4xl mx-auto">
-          <FaMusic className="text-gray-400 flex-shrink-0" />
-
-          {isMusicHost ? (
+          {ytMode ? (
             <>
-              {playlist.length === 0 && (!user || savedPlaylists.length === 0) ? (
-                <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
-                  Load Music
-                  <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
-                </label>
-              ) : (
+              <FaYoutube className="text-red-500 flex-shrink-0" size={16} />
+              {isYtHost ? (
                 <>
                   {/* Prev */}
                   <button
-                    onClick={prevTrack}
-                    disabled={currentTrackIndex <= 0 && musicTime <= 3}
+                    onClick={ytPrevTrack}
                     className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
                   >
                     <FaStepBackward size={11} />
                   </button>
                   {/* Play/Pause */}
-                  <button onClick={toggleMusic} className="p-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white transition-colors flex-shrink-0">
-                    {musicPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
+                  <button onClick={toggleYtPlayback} className="p-2 rounded-lg bg-red-600 hover:bg-red-500 text-white transition-colors flex-shrink-0">
+                    {ytPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
                   </button>
                   {/* Next */}
                   <button
-                    onClick={nextTrack}
-                    disabled={currentTrackIndex >= playlist.length - 1}
+                    onClick={ytNextTrack}
                     className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
                   >
                     <FaStepForward size={11} />
                   </button>
                   {/* Time + Progress */}
-                  <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
-                  <div className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group" onClick={seekMusic}>
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(ytTime)}</span>
+                  <div className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group" onClick={seekYt}>
                     <div
-                      className="h-full bg-primary-500 rounded-full transition-all"
-                      style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
+                      className="h-full bg-red-500 rounded-full transition-all"
+                      style={{ width: `${ytDuration ? (ytTime / ytDuration) * 100 : 0}%` }}
                     />
                   </div>
-                  <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(ytDuration)}</span>
                   {/* Track info */}
-                  <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
-                  {playlist.length > 1 && (
-                    <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                  <span className="text-xs text-gray-300 truncate max-w-[120px]" title={ytVideoTitle}>{ytVideoTitle || 'YouTube'}</span>
+                  {ytPlaylistItems.length > 1 && (
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">{ytCurrentIndex + 1}/{ytPlaylistItems.length}</span>
                   )}
+                  {/* Stop */}
+                  <button
+                    onClick={stopYouTube}
+                    className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-red-400 transition-colors flex-shrink-0"
+                    title="Stop YouTube"
+                  >
+                    <FaStop size={11} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ytPlaying ? 'bg-red-400 animate-pulse' : 'bg-gray-500'}`} />
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(ytTime)}</span>
+                  <div className="flex-1 h-1.5 bg-gray-700 rounded-full relative">
+                    <div
+                      className="h-full bg-red-500 rounded-full transition-all"
+                      style={{ width: `${ytDuration ? (ytTime / ytDuration) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(ytDuration)}</span>
+                  <span className="text-xs text-gray-300 truncate max-w-[120px]" title={ytVideoTitle}>{ytVideoTitle || 'YouTube'}</span>
                 </>
               )}
             </>
           ) : (
             <>
-              {playlist.length > 0 ? (
+              <FaMusic className="text-gray-400 flex-shrink-0" />
+
+              {isMusicHost ? (
                 <>
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${musicPlaying ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
-                  <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
-                  <div className="flex-1 h-1.5 bg-gray-700 rounded-full relative">
-                    <div
-                      className="h-full bg-primary-500 rounded-full transition-all"
-                      style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
-                  <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
-                  {playlist.length > 1 && (
-                    <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                  {playlist.length === 0 && (!user || savedPlaylists.length === 0) ? (
+                    <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
+                      Load Music
+                      <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
+                    </label>
+                  ) : (
+                    <>
+                      {/* Prev */}
+                      <button
+                        onClick={prevTrack}
+                        disabled={currentTrackIndex <= 0 && musicTime <= 3}
+                        className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
+                      >
+                        <FaStepBackward size={11} />
+                      </button>
+                      {/* Play/Pause */}
+                      <button onClick={toggleMusic} className="p-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white transition-colors flex-shrink-0">
+                        {musicPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
+                      </button>
+                      {/* Next */}
+                      <button
+                        onClick={nextTrack}
+                        disabled={currentTrackIndex >= playlist.length - 1}
+                        className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
+                      >
+                        <FaStepForward size={11} />
+                      </button>
+                      {/* Time + Progress */}
+                      <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
+                      <div className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group" onClick={seekMusic}>
+                        <div
+                          className="h-full bg-primary-500 rounded-full transition-all"
+                          style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
+                      {/* Track info */}
+                      <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
+                      {playlist.length > 1 && (
+                        <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                      )}
+                    </>
                   )}
                 </>
               ) : (
-                <span className="text-xs text-gray-500">Peer can load music to listen together</span>
+                <>
+                  {playlist.length > 0 ? (
+                    <>
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${musicPlaying ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+                      <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
+                      <div className="flex-1 h-1.5 bg-gray-700 rounded-full relative">
+                        <div
+                          className="h-full bg-primary-500 rounded-full transition-all"
+                          style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
+                      <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
+                      {playlist.length > 1 && (
+                        <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-gray-500">Peer can load music to listen together</span>
+                  )}
+                </>
               )}
             </>
           )}
 
-          {/* Playlist panel toggle - 只有会议创建者可以管理音乐 */}
-          {!urlRoomId && (playlist.length > 0 || (user && savedPlaylists.length > 0)) && (
+          {/* Playlist panel toggle */}
+          {!urlRoomId && (
             <button
               onClick={() => setShowPlaylistPanel(p => !p)}
               className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
