@@ -2193,90 +2193,80 @@ export default function MeetPage() {
             <>
               <FaMusic className="text-gray-400 flex-shrink-0" />
 
-              {isMusicHost ? (
+              {isMusicHost && playlist.length > 0 ? (
                 <>
-                  {playlist.length === 0 && (!user || savedPlaylists.length === 0) ? (
-                    <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
-                      Load Music
-                      <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
-                    </label>
-                  ) : (
-                    <>
-                      {/* Prev */}
-                      <button
-                        onClick={prevTrack}
-                        disabled={currentTrackIndex <= 0 && musicTime <= 3}
-                        className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
-                      >
-                        <FaStepBackward size={11} />
-                      </button>
-                      {/* Play/Pause */}
-                      <button onClick={toggleMusic} className="p-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white transition-colors flex-shrink-0">
-                        {musicPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
-                      </button>
-                      {/* Next */}
-                      <button
-                        onClick={nextTrack}
-                        disabled={currentTrackIndex >= playlist.length - 1}
-                        className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
-                      >
-                        <FaStepForward size={11} />
-                      </button>
-                      {/* Time + Progress */}
-                      <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
-                      <div className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group" onClick={seekMusic}>
-                        <div
-                          className="h-full bg-primary-500 rounded-full transition-all"
-                          style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
-                      {/* Track info */}
-                      <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
-                      {playlist.length > 1 && (
-                        <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
-                      )}
-                    </>
+                  {/* Prev */}
+                  <button
+                    onClick={prevTrack}
+                    disabled={currentTrackIndex <= 0 && musicTime <= 3}
+                    className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
+                  >
+                    <FaStepBackward size={11} />
+                  </button>
+                  {/* Play/Pause */}
+                  <button onClick={toggleMusic} className="p-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white transition-colors flex-shrink-0">
+                    {musicPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
+                  </button>
+                  {/* Next */}
+                  <button
+                    onClick={nextTrack}
+                    disabled={currentTrackIndex >= playlist.length - 1}
+                    className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white disabled:text-gray-600 transition-colors flex-shrink-0"
+                  >
+                    <FaStepForward size={11} />
+                  </button>
+                  {/* Time + Progress */}
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
+                  <div className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group" onClick={seekMusic}>
+                    <div
+                      className="h-full bg-primary-500 rounded-full transition-all"
+                      style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
+                  {/* Track info */}
+                  <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
+                  {playlist.length > 1 && (
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
+                  )}
+                </>
+              ) : !isMusicHost && playlist.length > 0 ? (
+                <>
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${musicPlaying ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
+                  <div className="flex-1 h-1.5 bg-gray-700 rounded-full relative">
+                    <div
+                      className="h-full bg-primary-500 rounded-full transition-all"
+                      style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
+                  <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
+                  {playlist.length > 1 && (
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
                   )}
                 </>
               ) : (
-                <>
-                  {playlist.length > 0 ? (
-                    <>
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${musicPlaying ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
-                      <span className="text-xs text-gray-400 flex-shrink-0 w-10 text-right">{formatTime(musicTime)}</span>
-                      <div className="flex-1 h-1.5 bg-gray-700 rounded-full relative">
-                        <div
-                          className="h-full bg-primary-500 rounded-full transition-all"
-                          style={{ width: `${musicDuration ? (musicTime / musicDuration) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(musicDuration)}</span>
-                      <span className="text-xs text-gray-300 truncate max-w-[120px]" title={musicName}>{musicName}</span>
-                      {playlist.length > 1 && (
-                        <span className="text-[10px] text-gray-500 flex-shrink-0">{currentTrackIndex + 1}/{playlist.length}</span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-xs text-gray-500">Peer can load music to listen together</span>
-                  )}
-                </>
+                <span
+                  className="text-xs text-gray-500 cursor-pointer hover:text-gray-300 transition-colors"
+                  onClick={() => setShowPlaylistPanel(true)}
+                >
+                  Click to load music or YouTube
+                </span>
               )}
             </>
           )}
 
           {/* Playlist panel toggle */}
-          {!urlRoomId && (
-            <button
-              onClick={() => setShowPlaylistPanel(p => !p)}
-              className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
-                showPlaylistPanel ? 'bg-primary-600 text-white' : 'hover:bg-gray-700 text-gray-400 hover:text-white'
-              }`}
-              title="Playlist"
-            >
-              <FaListUl size={13} />
-            </button>
-          )}
+          <button
+            onClick={() => setShowPlaylistPanel(p => !p)}
+            className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+              showPlaylistPanel ? 'bg-primary-600 text-white' : 'hover:bg-gray-700 text-gray-400 hover:text-white'
+            }`}
+            title="Playlist"
+          >
+            <FaListUl size={13} />
+          </button>
         </div>
       </div>
 
