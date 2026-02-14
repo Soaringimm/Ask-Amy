@@ -2565,7 +2565,7 @@ export default function MeetPage() {
                 </>
               ) : (
                 <span
-                  className="text-xs text-gray-500 cursor-pointer hover:text-gray-300 transition-colors"
+                  className="flex-1 text-center text-xs text-gray-500 cursor-pointer hover:text-gray-300 transition-colors"
                   onClick={() => setShowPlaylistPanel(true)}
                 >
                   Click to load music or YouTube
