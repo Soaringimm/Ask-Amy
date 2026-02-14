@@ -100,17 +100,22 @@ export function createYTPlayer(elementId, { videoId, listId, onReady, onStateCha
     playerVars.list = listId
   }
 
-  return new window.YT.Player(elementId, {
+  const opts = {
     height: '1',
     width: '1',
-    videoId: videoId || undefined,
     playerVars,
     events: {
       onReady: onReady || (() => {}),
       onStateChange: (e) => onStateChange?.(e.data),
       onError: (e) => onError?.(e.data),
     },
-  })
+  }
+  // Only set videoId when we actually have one — passing undefined still triggers validation
+  if (videoId) {
+    opts.videoId = videoId
+  }
+
+  return new window.YT.Player(elementId, opts)
 }
 
 /**
