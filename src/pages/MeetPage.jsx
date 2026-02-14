@@ -1739,7 +1739,7 @@ export default function MeetPage() {
 
           {isMusicHost ? (
             <>
-              {playlist.length === 0 ? (
+              {playlist.length === 0 && (!user || savedPlaylists.length === 0) ? (
                 <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
                   Load Music
                   <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
@@ -1808,7 +1808,7 @@ export default function MeetPage() {
           )}
 
           {/* Either user can load music when nothing loaded */}
-          {!isMusicHost && playlist.length === 0 && (
+          {!isMusicHost && playlist.length === 0 && (!user || savedPlaylists.length === 0) && (
             <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors ml-auto">
               Load Music
               <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
