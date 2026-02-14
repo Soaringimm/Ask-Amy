@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import {
   FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
   FaMusic, FaPlay, FaPause, FaPhone, FaCopy, FaCheck, FaSignInAlt,
   FaStepBackward, FaStepForward, FaListUl, FaSave, FaTrash,
-  FaPlus, FaTimes, FaCircle, FaStop, FaEdit, FaHistory,
+  FaPlus, FaTimes, FaCircle, FaStop, FaEdit, FaHistory, FaDesktop,
 } from 'react-icons/fa'
 import { supabase } from '../lib/supabase'
 import {
@@ -54,6 +54,8 @@ export default function MeetPage() {
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [audioBlocked, setAudioBlocked] = useState(false)
+  const [isScreenSharing, setIsScreenSharing] = useState(false)
+  const screenStreamRef = useRef(null)
 
   // Playlist state
   const [playlist, setPlaylist] = useState([]) // [{ name, duration, buffer }]
@@ -83,9 +85,11 @@ export default function MeetPage() {
 
   // Supabase auth + saved playlists
   const [user, setUser] = useState(null)
+  const [userRole, setUserRole] = useState(null) // 'admin' | 'client' | null
   const [savedPlaylists, setSavedPlaylists] = useState([])
   const [playlistName, setPlaylistName] = useState('')
   const [savingPlaylist, setSavingPlaylist] = useState(false)
+  const [videoResolution, setVideoResolution] = useState('fhd') // 'sd' | 'hd' | 'fhd' - 默认全高清
 
   // Refs
   const socketRef = useRef(null)
@@ -131,6 +135,7 @@ export default function MeetPage() {
     supabase.auth.getUser().then(({ data }) => {
       if (data?.user) {
         setUser(data.user)
+        fetchUserRole(data.user.id)
         fetchSavedPlaylists(data.user.id)
         getRecordings(data.user.id).then(setRecordings).catch(() => {})
       }
@@ -139,15 +144,32 @@ export default function MeetPage() {
       const u = session?.user || null
       setUser(u)
       if (u) {
+        fetchUserRole(u.id)
         fetchSavedPlaylists(u.id)
         getRecordings(u.id).then(setRecordings).catch(() => {})
       } else {
+        setUserRole(null)
         setSavedPlaylists([])
         setRecordings([])
       }
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  async function fetchUserRole(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('aa_profiles')
+        .select('role')
+        .eq('id', userId)
+        .single()
+      if (!error && data) {
+        setUserRole(data.role)
+      }
+    } catch (err) {
+      console.error('Failed to fetch user role:', err)
+    }
+  }
 
   async function fetchSavedPlaylists(userId) {
     try {
@@ -223,14 +245,51 @@ export default function MeetPage() {
     if (audioCtxRef.current) { audioCtxRef.current.close() }
     if (pcRef.current) { pcRef.current.close() }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()) }
+    if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()) }
     if (socketRef.current) { socketRef.current.disconnect() }
   }
 
   // ─── Connection ───────────────────────────────────────────────────────────
 
+  // 检查创建会议权限
+  function canCreateMeeting() {
+    if (!user) {
+      return { allowed: false, reason: '请先登录才能创建会议' }
+    }
+    if (userRole !== 'admin') {
+      return { allowed: false, reason: '只有管理员可以创建会议。您可以通过会议 ID 加入现有会议。' }
+    }
+    return { allowed: true }
+  }
+
+  // 获取视频约束配置
+  function getVideoConstraints() {
+    const resolutions = {
+      sd: { width: 640, height: 480 },
+      hd: { width: 1280, height: 720 },
+      fhd: { width: 1920, height: 1080 },
+    }
+    return {
+      width: { ideal: resolutions[videoResolution].width },
+      height: { ideal: resolutions[videoResolution].height },
+      facingMode: 'user',
+    }
+  }
+
   async function initConnection(mode, targetRoomId) {
     setError('')
     setAudioBlocked(false)
+
+    // 创建会议权限检查
+    if (mode === 'create') {
+      const { allowed, reason } = canCreateMeeting()
+      if (!allowed) {
+        setError(reason)
+        setPhase('lobby')
+        return
+      }
+    }
+
     try {
       const io = await loadSocketIO()
       const socket = io(SIGNAL_URL, { path: '/socket.io/', transports: ['websocket', 'polling'] })
@@ -290,7 +349,10 @@ export default function MeetPage() {
       })
 
       const [stream] = await Promise.all([
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+        navigator.mediaDevices.getUserMedia({
+          video: getVideoConstraints(),
+          audio: true
+        }),
         new Promise((resolve) => {
           if (socket.connected) resolve()
           else socket.on('connect', () => resolve())
@@ -1023,6 +1085,85 @@ export default function MeetPage() {
     }
   }
 
+  // 屏幕共享功能
+  async function toggleScreenShare() {
+    if (isScreenSharing) {
+      // 停止屏幕共享，切换回摄像头
+      await stopScreenShare()
+    } else {
+      // 开始屏幕共享
+      await startScreenShare()
+    }
+  }
+
+  async function startScreenShare() {
+    try {
+      // 获取屏幕共享流
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always',
+          displaySurface: 'monitor'
+        },
+        audio: false // 屏幕共享通常不需要音频
+      })
+
+      screenStreamRef.current = screenStream
+
+      // 监听用户通过浏览器停止共享按钮停止共享
+      const screenTrack = screenStream.getVideoTracks()[0]
+      screenTrack.onended = () => {
+        stopScreenShare()
+      }
+
+      // 替换 PeerConnection 中的视频轨道
+      if (pcRef.current && localStreamRef.current) {
+        const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video')
+        if (sender) {
+          await sender.replaceTrack(screenTrack)
+        }
+
+        // 更新本地视频显示
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream
+        }
+      }
+
+      setIsScreenSharing(true)
+    } catch (err) {
+      console.error('Failed to start screen share:', err)
+      setError('无法开始屏幕共享')
+      setTimeout(() => setError(''), 3000)
+    }
+  }
+
+  async function stopScreenShare() {
+    try {
+      // 停止屏幕共享流
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(track => track.stop())
+        screenStreamRef.current = null
+      }
+
+      // 切换回摄像头
+      if (pcRef.current && localStreamRef.current) {
+        const videoTrack = localStreamRef.current.getVideoTracks()[0]
+        const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video')
+        if (sender && videoTrack) {
+          await sender.replaceTrack(videoTrack)
+        }
+
+        // 恢复本地视频显示
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current
+        }
+      }
+
+      setIsScreenSharing(false)
+    } catch (err) {
+      console.error('Failed to stop screen share:', err)
+    }
+  }
+
   function hangUp() {
     cleanup()
     window.location.href = '/meet'
@@ -1051,44 +1192,118 @@ export default function MeetPage() {
 
   // ==================== RENDER ====================
 
-  // Lobby view
+  // Lobby view - 精致优雅的启动界面
   if (phase === 'lobby') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-100 mb-4">
-              <FaVideo className="text-2xl text-primary-600" />
+      <div className="min-h-screen mesh-gradient flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Animated background elements */}
+        <div className="absolute inset-0 opacity-30">
+          <div className="absolute top-20 left-20 w-72 h-72 bg-primary-400/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '4s' }} />
+          <div className="absolute bottom-20 right-20 w-96 h-96 bg-accent-400/10 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '6s', animationDelay: '2s' }} />
+        </div>
+
+        <div className="w-full max-w-lg relative z-10">
+          {/* 用户信息卡片 - 优雅设计 */}
+          {user && (
+            <div className="mb-6 p-4 rounded-2xl bg-white/80 backdrop-blur-xl border border-white/40 shadow-soft-lg transform hover:scale-[1.02] transition-all duration-300">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center shadow-lg">
+                  <span className="text-lg font-semibold text-white">
+                    {user.email?.charAt(0).toUpperCase() || '?'}
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-gray-900">{user.email}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      userRole === 'admin'
+                        ? 'bg-primary-100 text-primary-700'
+                        : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {userRole === 'admin' ? '👑 管理员' : '👤 普通用户'}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <h1 className="text-3xl font-bold text-primary-950 mb-2">Quick Meet</h1>
-            <p className="text-gray-500">No sign-up needed. Share the Meeting ID to connect.</p>
+          )}
+
+          {/* 主标题区域 - 现代设计 */}
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-primary-500 to-primary-600 mb-6 shadow-2xl transform hover:rotate-6 transition-transform duration-300 float-container">
+              <FaVideo className="text-3xl text-white" />
+            </div>
+            <h1 className="text-5xl font-bold text-gray-900 mb-3 tracking-tight">
+              Quick <span className="gradient-text">Meet</span>
+            </h1>
+            <p className="text-lg text-gray-600 font-medium">
+              {user && userRole === 'admin'
+                ? '创建或加入会议，开启高效协作'
+                : '输入会议 ID，即刻开始连接'}
+            </p>
           </div>
 
+          {/* 错误提示 - 优雅动画 */}
           {error && (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-              {error}
+            <div className="mb-6 p-4 rounded-2xl bg-red-50/80 backdrop-blur-sm border border-red-200/50 text-red-700 shadow-soft animate-shake">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-xs">!</span>
+                </div>
+                <p className="text-sm font-medium">{error}</p>
+              </div>
             </div>
           )}
 
           <div className="space-y-4">
+            {/* 视频分辨率选择 - 精致设计 */}
+            {user && userRole === 'admin' && (
+              <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-5 border border-white/40 shadow-soft-lg transform hover:scale-[1.01] transition-all duration-300">
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  视频分辨率
+                </label>
+                <select
+                  value={videoResolution}
+                  onChange={(e) => setVideoResolution(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-primary-400 focus:ring-4 focus:ring-primary-100 outline-none transition-all duration-200 bg-white font-medium text-gray-900"
+                >
+                  <option value="sd">📺 标清 - 640×480</option>
+                  <option value="hd">🎬 高清 - 1280×720</option>
+                  <option value="fhd">✨ 全高清 - 1920×1080 (推荐)</option>
+                </select>
+              </div>
+            )}
+
+            {/* 创建会议按钮 - 醒目设计 */}
             <button
               onClick={() => { setPhase('joining'); initConnection('create') }}
-              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-semibold text-lg transition-colors shadow-lg shadow-primary-600/20"
+              className="group w-full relative overflow-hidden px-8 py-5 rounded-2xl bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-700 hover:to-primary-600 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed text-white font-bold text-lg shadow-2xl hover:shadow-glow transform hover:scale-[1.02] transition-all duration-300"
+              title={!user ? '需要登录' : userRole !== 'admin' ? '仅管理员可创建' : ''}
+              disabled={!user || userRole !== 'admin'}
             >
-              <FaVideo />
-              Create a Meeting
+              <div className="absolute inset-0 bg-white/20 animate-shimmer" />
+              <div className="relative flex items-center justify-center gap-3">
+                <FaVideo className="text-xl" />
+                <span>
+                  {!user ? '🔐 创建会议 (需登录)' :
+                   userRole !== 'admin' ? '🔒 创建会议 (仅管理员)' :
+                   '✨ 创建新会议'}
+                </span>
+              </div>
             </button>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-gray-50 text-gray-400">or join with ID</span>
-              </div>
+            {/* 分隔线 - 精致设计 */}
+            <div className="relative flex items-center py-4">
+              <div className="flex-1 border-t-2 border-gray-200" />
+              <span className="px-4 text-sm font-medium text-gray-400 bg-transparent">或使用会议 ID</span>
+              <div className="flex-1 border-t-2 border-gray-200" />
             </div>
 
-            <div className="flex gap-2">
+            {/* 加入会议输入框 - 现代设计 */}
+            <div className="flex gap-3">
               <input
                 type="text"
                 value={joinInput}
@@ -1099,8 +1314,8 @@ export default function MeetPage() {
                     initConnection('join', joinInput.trim())
                   }
                 }}
-                placeholder="Enter Meeting ID"
-                className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none text-lg tracking-widest font-mono text-center uppercase"
+                placeholder="输入 8 位会议 ID"
+                className="flex-1 px-5 py-4 rounded-xl border-2 border-gray-200 focus:border-primary-400 focus:ring-4 focus:ring-primary-100 outline-none text-xl tracking-[0.3em] font-mono text-center uppercase bg-white/80 backdrop-blur-sm shadow-soft transition-all duration-200 font-bold"
                 maxLength={8}
               />
               <button
@@ -1111,27 +1326,81 @@ export default function MeetPage() {
                   }
                 }}
                 disabled={!joinInput.trim()}
-                className="px-5 py-3 rounded-xl bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 text-white font-medium transition-colors"
+                className="px-6 py-4 rounded-xl bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 text-white font-semibold transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
               >
-                <FaSignInAlt />
+                <FaSignInAlt className="text-xl" />
               </button>
             </div>
+
+            {/* 登录提示 - 优雅设计 */}
+            {!user && (
+              <div className="text-center pt-6 mt-6 border-t-2 border-gray-200">
+                <p className="text-sm text-gray-600 mb-3 font-medium">
+                  💼 需要创建会议？
+                </p>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 font-semibold link-underline transition-colors"
+                >
+                  立即登录或注册
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>
     )
   }
 
-  // Connecting view
+  // Connecting view - 优雅的连接动画
   if (phase === 'joining') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Connecting...</p>
+      <div className="min-h-screen mesh-gradient flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Animated background */}
+        <div className="absolute inset-0 opacity-20">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-400/30 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '3s' }} />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent-400/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '4s', animationDelay: '1s' }} />
+        </div>
+
+        <div className="text-center relative z-10 max-w-md">
+          {/* 连接动画 - 优雅设计 */}
+          <div className="relative mb-8">
+            <div className="w-24 h-24 border-8 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center shadow-2xl">
+                <FaVideo className="text-white text-2xl animate-pulse" />
+              </div>
+            </div>
+          </div>
+
+          <h2 className="text-3xl font-bold text-gray-900 mb-3">正在连接...</h2>
+          <p className="text-lg text-gray-600 mb-8 font-medium">
+            正在建立安全连接，请稍候
+          </p>
+
+          {/* 连接步骤指示器 */}
+          <div className="flex justify-center gap-2 mb-8">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="w-3 h-3 rounded-full bg-primary-400 animate-pulse"
+                style={{ animationDelay: `${i * 0.2}s` }}
+              />
+            ))}
+          </div>
+
+          {/* 错误提示 */}
           {error && (
-            <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm max-w-sm">
-              {error}
+            <div className="p-4 rounded-2xl bg-red-50/80 backdrop-blur-sm border border-red-200/50 shadow-soft-lg">
+              <div className="flex items-center gap-3 text-red-700">
+                <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-sm font-bold">!</span>
+                </div>
+                <p className="text-sm font-medium text-left">{error}</p>
+              </div>
             </div>
           )}
         </div>
@@ -1139,33 +1408,70 @@ export default function MeetPage() {
     )
   }
 
-  // ─── Meeting view ─────────────────────────────────────────────────────────
+  // ─── Meeting view - 优雅专业的会议界面 ─────────────────────────────────
   return (
-    <div className="h-screen bg-gray-900 flex flex-col">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-800/80 backdrop-blur text-white">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-gray-300">Meeting ID:</span>
-          <code className="px-3 py-1 rounded-lg bg-gray-700 text-sm font-mono tracking-widest">{roomId}</code>
-          <button onClick={copyRoomId} className="p-1.5 rounded-lg hover:bg-gray-700 transition-colors text-gray-400 hover:text-white">
-            {copied ? <FaCheck className="text-green-400" /> : <FaCopy />}
-          </button>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${peerConnected ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
-            <span className="text-sm text-gray-300">{peerConnected ? 'Peer connected' : 'Waiting for peer...'}</span>
+    <div className="h-screen meet-bg-dark flex flex-col relative overflow-hidden">
+      {/* Ambient background effects */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-500/30 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-accent-500/20 rounded-full blur-3xl" />
+      </div>
+
+      {/* Top bar - 优雅设计 */}
+      <div className="relative z-10 flex items-center justify-between px-6 py-3 meet-control-panel shadow-2xl">
+        <div className="flex items-center gap-4">
+          {/* Meeting ID Badge */}
+          <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">会议 ID</span>
+            <code className="text-sm font-mono tracking-[0.2em] text-white font-bold">{roomId}</code>
+            <button
+              onClick={copyRoomId}
+              className="p-1.5 rounded-lg hover:bg-slate-700/50 transition-all duration-200 text-slate-400 hover:text-white transform hover:scale-110"
+              title="复制会议 ID"
+            >
+              {copied ? (
+                <FaCheck className="text-green-400 animate-pulse" />
+              ) : (
+                <FaCopy className="text-sm" />
+              )}
+            </button>
           </div>
+
+          {/* Connection Status */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50">
+            <div className={`w-2.5 h-2.5 rounded-full ${
+              peerConnected
+                ? 'bg-green-400 animate-pulse-ring'
+                : 'bg-yellow-400 animate-pulse'
+            }`} />
+            <span className="text-sm text-slate-300 font-medium">
+              {peerConnected ? '✅ 已连接' : '⏳ 等待对方...'}
+            </span>
+          </div>
+        </div>
+
+        {/* Right side actions */}
+        <div className="flex items-center gap-3">
+          {/* Recording History */}
           {user && recordings.length > 0 && (
             <button
               onClick={() => { setShowRecordings(true); fetchRecordings() }}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-sm"
-              title="Past recordings"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-slate-700/50 text-slate-400 hover:text-white transition-all duration-200 border border-transparent hover:border-slate-700/50"
+              title="历史录制"
             >
-              <FaHistory size={12} />
-              <span>{recordings.length}</span>
+              <FaHistory className="text-sm" />
+              <span className="text-sm font-semibold">{recordings.length}</span>
+              <span className="text-xs">录制</span>
             </button>
           )}
+
+          {/* Resolution Indicator */}
+          <div className="px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/50">
+            <span className="text-xs text-slate-400 font-medium">
+              {videoResolution === 'fhd' ? '📺 1080p' :
+               videoResolution === 'hd' ? '📺 720p' : '📺 480p'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1181,19 +1487,65 @@ export default function MeetPage() {
       )}
 
       {/* Video area + Playlist panel */}
-      <div className="flex-1 flex min-h-0">
-        {/* Video */}
-        <div className="flex-1 flex items-center justify-center gap-4 p-4 relative">
-          <div className="flex-1 h-full relative rounded-2xl overflow-hidden bg-gray-800 flex items-center justify-center">
-            <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+      <div className="flex-1 flex min-h-0 relative z-0">
+        {/* Main Video Area */}
+        <div className="flex-1 flex items-center justify-center p-6 relative">
+          {/* Remote Video Container - 优雅设计 */}
+          <div className="flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30">
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
             {!peerConnected && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <p className="text-gray-500 text-lg">Waiting for peer to join...</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-sm">
+                <div className="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4 animate-pulse">
+                  <FaVideo className="text-3xl text-slate-400" />
+                </div>
+                <p className="text-slate-300 text-xl font-semibold mb-2">等待对方加入...</p>
+                <p className="text-slate-500 text-sm">分享会议 ID 邀请参与者</p>
               </div>
             )}
+
+            {/* Overlay gradient for depth */}
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />
           </div>
-          <div className="absolute bottom-4 right-6 w-48 h-36 rounded-xl overflow-hidden shadow-2xl border-2 border-gray-700 z-10">
-            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover mirror" />
+
+          {/* Local Video (Picture-in-Picture) - 精致设计 */}
+          <div className={`absolute bottom-8 right-8 w-64 h-48 rounded-2xl overflow-hidden shadow-2xl z-20 transform hover:scale-105 transition-all duration-300 group ${
+            isScreenSharing
+              ? 'border-2 border-primary-500/80 shadow-primary-500/30'
+              : 'border-2 border-slate-600/50'
+          }`}>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover ${isScreenSharing ? '' : 'mirror'}`}
+            />
+            {/* Label */}
+            <div className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-white font-semibold">
+                  {isScreenSharing ? '🖥️ 你的屏幕' : '👤 你'}
+                </span>
+                {isScreenSharing && (
+                  <span className="flex items-center gap-1 text-xs text-green-400 font-semibold">
+                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                    共享中
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Hover effect */}
+            <div className={`absolute inset-0 ring-2 transition-all duration-300 rounded-2xl ${
+              isScreenSharing
+                ? 'ring-primary-500/50 group-hover:ring-primary-500/80'
+                : 'ring-primary-500/0 group-hover:ring-primary-500/50'
+            }`} />
           </div>
         </div>
 
@@ -1431,64 +1783,132 @@ export default function MeetPage() {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center justify-center gap-4 px-4 py-4 bg-gray-800/80 backdrop-blur">
-        <button
-          onClick={toggleAudio}
-          className={`p-4 rounded-full transition-colors ${audioEnabled ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-red-500 hover:bg-red-600 text-white'}`}
-        >
-          {audioEnabled ? <FaMicrophone size={18} /> : <FaMicrophoneSlash size={18} />}
-        </button>
-        <button
-          onClick={toggleVideo}
-          className={`p-4 rounded-full transition-colors ${videoEnabled ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-red-500 hover:bg-red-600 text-white'}`}
-        >
-          {videoEnabled ? <FaVideo size={18} /> : <FaVideoSlash size={18} />}
-        </button>
-
-        {/* Recording controls */}
-        {!isRecording ? (
+      {/* Control Panel - 现代优雅设计 */}
+      <div className="relative z-10 flex items-center justify-center gap-3 px-6 py-5 meet-control-panel shadow-2xl">
+        <div className="flex items-center gap-3">
+          {/* Audio Control - 优雅按钮 */}
           <button
-            onClick={startRecording}
-            disabled={!!processingState && processingState !== 'done' && processingState !== 'error'}
-            className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white transition-colors"
-            title="Start recording"
+            onClick={toggleAudio}
+            className={`group relative p-5 rounded-2xl transition-all duration-300 transform hover:scale-110 ${
+              audioEnabled
+                ? 'bg-slate-700/80 hover:bg-slate-600/80 text-white shadow-lg hover:shadow-xl'
+                : 'bg-red-500/90 hover:bg-red-600/90 text-white shadow-lg shadow-red-500/30'
+            }`}
+            title={audioEnabled ? '静音' : '取消静音'}
           >
-            <FaCircle size={18} className="text-red-400" />
+            {audioEnabled ? <FaMicrophone size={20} /> : <FaMicrophoneSlash size={20} />}
+            {/* Tooltip */}
+            <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              {audioEnabled ? '静音' : '取消静音'}
+            </span>
           </button>
-        ) : (
-          <>
-            {/* Pause/Resume */}
-            <button
-              onClick={toggleRecordingPause}
-              className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
-              title={isPaused ? 'Resume recording' : 'Pause recording'}
-            >
-              {isPaused ? <FaPlay size={18} className="text-red-400" /> : <FaPause size={18} className="text-yellow-400" />}
-            </button>
-            {/* Stop */}
-            <button
-              onClick={stopRecording}
-              className="p-4 rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors"
-              title="Stop recording"
-            >
-              <FaStop size={18} />
-            </button>
-            {/* Timer */}
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-900/40 border border-red-700/50">
-              <div className={`w-2.5 h-2.5 rounded-full bg-red-500 ${isPaused ? '' : 'animate-pulse'}`} />
-              <span className="text-sm font-mono text-red-300">{formatTime(recordingTime)}</span>
-              {isPaused && <span className="text-xs text-yellow-400">PAUSED</span>}
-            </div>
-          </>
-        )}
 
-        <button
-          onClick={hangUp}
-          className="p-4 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors"
-        >
-          <FaPhone size={18} className="rotate-[135deg]" />
-        </button>
+          {/* Video Control */}
+          <button
+            onClick={toggleVideo}
+            className={`group relative p-5 rounded-2xl transition-all duration-300 transform hover:scale-110 ${
+              videoEnabled
+                ? 'bg-slate-700/80 hover:bg-slate-600/80 text-white shadow-lg hover:shadow-xl'
+                : 'bg-red-500/90 hover:bg-red-600/90 text-white shadow-lg shadow-red-500/30'
+            }`}
+            title={videoEnabled ? '关闭摄像头' : '打开摄像头'}
+          >
+            {videoEnabled ? <FaVideo size={20} /> : <FaVideoSlash size={20} />}
+            <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              {videoEnabled ? '关闭摄像头' : '打开摄像头'}
+            </span>
+          </button>
+
+          {/* Screen Share Control - 屏幕共享 */}
+          <button
+            onClick={toggleScreenShare}
+            className={`group relative p-5 rounded-2xl transition-all duration-300 transform hover:scale-110 ${
+              isScreenSharing
+                ? 'bg-primary-600/90 hover:bg-primary-700/90 text-white shadow-lg shadow-primary-500/30'
+                : 'bg-slate-700/80 hover:bg-slate-600/80 text-white shadow-lg hover:shadow-xl'
+            }`}
+            title={isScreenSharing ? '停止共享' : '共享屏幕'}
+          >
+            <FaDesktop size={20} />
+            <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              {isScreenSharing ? '停止共享' : '共享屏幕'}
+            </span>
+            {/* 共享中指示器 */}
+            {isScreenSharing && (
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-pulse" />
+            )}
+          </button>
+
+          {/* Divider */}
+          <div className="w-px h-10 bg-slate-700/50 mx-2" />
+
+          {/* Recording Controls */}
+          {!isRecording ? (
+            <button
+              onClick={startRecording}
+              disabled={!!processingState && processingState !== 'done' && processingState !== 'error'}
+              className="group relative p-5 rounded-2xl bg-slate-700/80 hover:bg-slate-600/80 disabled:bg-slate-800/50 disabled:text-slate-600 text-white transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-110 disabled:transform-none"
+              title="开始录制"
+            >
+              <FaCircle size={20} className="text-red-400" />
+              <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                开始录制
+              </span>
+            </button>
+          ) : (
+            <>
+              {/* Pause/Resume */}
+              <button
+                onClick={toggleRecordingPause}
+                className="group relative p-5 rounded-2xl bg-slate-700/80 hover:bg-slate-600/80 text-white transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-110"
+                title={isPaused ? '继续录制' : '暂停录制'}
+              >
+                {isPaused ? <FaPlay size={20} className="text-green-400" /> : <FaPause size={20} className="text-yellow-400" />}
+                <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  {isPaused ? '继续录制' : '暂停录制'}
+                </span>
+              </button>
+
+              {/* Stop Recording */}
+              <button
+                onClick={stopRecording}
+                className="group relative p-5 rounded-2xl bg-red-600/90 hover:bg-red-700/90 text-white transition-all duration-300 shadow-lg shadow-red-600/30 hover:shadow-xl transform hover:scale-110"
+                title="停止录制"
+              >
+                <FaStop size={20} />
+                <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  停止录制
+                </span>
+              </button>
+
+              {/* Recording Timer - 优雅设计 */}
+              <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-red-900/60 border-2 border-red-700/50 shadow-lg">
+                <div className={`w-3 h-3 rounded-full bg-red-500 ${isPaused ? '' : 'animate-pulse'}`} />
+                <span className="text-base font-mono font-bold text-white tabular-nums">{formatTime(recordingTime)}</span>
+                {isPaused && (
+                  <span className="text-xs font-bold text-yellow-400 px-2 py-0.5 rounded-full bg-yellow-400/20">
+                    暂停
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Divider */}
+          <div className="w-px h-10 bg-slate-700/50 mx-2" />
+
+          {/* Hang Up Button - 醒目设计 */}
+          <button
+            onClick={hangUp}
+            className="group relative p-5 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white transition-all duration-300 shadow-lg shadow-red-500/40 hover:shadow-xl transform hover:scale-110"
+            title="结束通话"
+          >
+            <FaPhone size={20} className="rotate-[135deg]" />
+            <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              结束通话
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Topic input modal */}
