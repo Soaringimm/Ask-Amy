@@ -201,9 +201,12 @@ export default function MeetPage() {
     const isMin = pipId === 'local' ? localPipMin : remotePipMin
     const curW = isMin ? PIP_BAR_W : size.w
     const curH = isMin ? PIP_BAR_H : size.h
+    const startX = e.clientX, startY = e.clientY
+    let didMove = false
     dragOffsetRef.current = { x: e.clientX - rect.left - pos.x, y: e.clientY - rect.top - pos.y }
     const onMove = (ev) => {
       if (!draggingPipRef.current) return
+      if (!didMove && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 3) didMove = true
       const r = el.getBoundingClientRect()
       let nx = ev.clientX - r.left - dragOffsetRef.current.x
       let ny = ev.clientY - r.top - dragOffsetRef.current.y
@@ -216,6 +219,11 @@ export default function MeetPage() {
       draggingPipRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      // Click without drag on minimized bar → restore
+      if (!didMove && isMin) {
+        const setMin = pipId === 'local' ? setLocalPipMin : setRemotePipMin
+        setMin(false)
+      }
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -2262,8 +2270,7 @@ export default function MeetPage() {
               : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'
             }
             style={ytMode ? getPipStyle('remote') : undefined}
-            onPointerDown={ytMode && !remotePipMin ? (e) => onPipPointerDown(e, 'remote') : undefined}
-            onClick={ytMode && remotePipMin ? () => setRemotePipMin(false) : undefined}
+            onPointerDown={ytMode ? (e) => onPipPointerDown(e, 'remote') : undefined}
           >
             {/* Minimized overlay — covers video when minimized */}
             {ytMode && remotePipMin && (
@@ -2338,8 +2345,7 @@ export default function MeetPage() {
                 : 'border-2 border-slate-600/50'
             }`}
             style={getPipStyle('local')}
-            onPointerDown={localPipMin ? undefined : (e) => onPipPointerDown(e, 'local')}
-            onClick={localPipMin ? () => setLocalPipMin(false) : undefined}
+            onPointerDown={(e) => onPipPointerDown(e, 'local')}
           >
             {/* Minimized overlay — covers video when minimized */}
             {localPipMin && (
