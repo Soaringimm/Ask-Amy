@@ -84,6 +84,7 @@ export default function MeetPage() {
   const [ytCurrentIndex, setYtCurrentIndex] = useState(-1)
   const [ytLoading, setYtLoading] = useState(false)
   const [isYtHost, setIsYtHost] = useState(false)    // who loaded the YouTube URL
+  const [ytPlaybackRate, setYtPlaybackRate] = useState(1)
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false)
@@ -165,6 +166,24 @@ export default function MeetPage() {
   // Derived values
   const currentTrack = playlist[currentTrackIndex] || null
   const musicName = currentTrack?.name || ''
+
+  // ─── ResizeObserver: auto-resize YT player when container changes ────────
+  useEffect(() => {
+    const container = ytContainerRef.current
+    if (!container) return
+    const ro = new ResizeObserver((entries) => {
+      const p = ytPlayerRef.current
+      if (!p || typeof p.setSize !== 'function') return
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        if (width > 0 && height > 0) {
+          p.setSize(width, height)
+        }
+      }
+    })
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [])
 
   // ─── Fetch YouTube playlist track titles via noembed ─────────────────────
   useEffect(() => {
@@ -900,6 +919,7 @@ export default function MeetPage() {
       const player = createYTPlayer('yt-player-embed', {
         videoId: parsed.videoId,
         listId: parsed.listId,
+        visible: true,
         onReady: () => {
           setYtLoading(false)
           // Playlist info may not be available yet for playlist-only URLs.
@@ -1001,6 +1021,18 @@ export default function MeetPage() {
     }
   }
 
+  function cycleYtSpeed() {
+    const p = ytPlayerRef.current
+    if (!p) return
+    const rates = [0.5, 0.75, 1, 1.25, 1.5, 2]
+    const next = rates[(rates.indexOf(ytPlaybackRate) + 1) % rates.length]
+    p.setPlaybackRate(next)
+    setYtPlaybackRate(next)
+    if (socketRef.current) {
+      socketRef.current.emit('music-sync', { type: 'yt-state', state: 'rate', rate: next })
+    }
+  }
+
   function stopYouTube() {
     if (ytPlayerRef.current) {
       ytPlayerRef.current.stopVideo()
@@ -1017,6 +1049,7 @@ export default function MeetPage() {
     setYtCurrentIndex(-1)
     setYtUrl('')
     setIsYtHost(false)
+    setYtPlaybackRate(1)
     ytTitlesFetchingRef.current.clear()
     if (socketRef.current) {
       socketRef.current.emit('music-sync', { type: 'yt-stop' })
@@ -1049,6 +1082,7 @@ export default function MeetPage() {
       const player = createYTPlayer('yt-player-embed', {
         videoId: msg.videoId,
         listId: msg.listId,
+        visible: true,
         onReady: () => {
           setYtLoading(false)
           const pl = player.getPlaylist?.()
@@ -1160,6 +1194,9 @@ export default function MeetPage() {
         } else if (msg.state === 'seek') {
           p.seekTo(msg.time, true)
           setYtTime(msg.time)
+        } else if (msg.state === 'rate') {
+          p.setPlaybackRate(msg.rate)
+          setYtPlaybackRate(msg.rate)
         }
         setTimeout(() => { ytIgnoreStateRef.current = false }, 500)
         break
@@ -1179,6 +1216,7 @@ export default function MeetPage() {
         setYtPlaylistItems([])
         setYtCurrentIndex(-1)
         setIsYtHost(false)
+        setYtPlaybackRate(1)
         break
     }
   }
@@ -2070,11 +2108,6 @@ export default function MeetPage() {
         </button>
       )}
 
-      {/* YouTube player container — offscreen but in DOM (YT API needs it visible) */}
-      <div ref={ytContainerRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0, pointerEvents: 'none' }}>
-        <div id="yt-player-embed"></div>
-      </div>
-
       {/* Video area + Playlist panel */}
       <div className="flex-1 flex min-h-0 relative z-0">
         {/* Main Video Area */}
@@ -2088,6 +2121,15 @@ export default function MeetPage() {
               muted
               className="w-full h-full object-cover"
             />
+
+            {/* YouTube player overlay — covers remote video when ytMode */}
+            <div
+              ref={ytContainerRef}
+              className={ytMode ? 'absolute inset-0 z-10 bg-black' : 'hidden'}
+              style={!isYtHost ? { pointerEvents: 'none' } : undefined}
+            >
+              <div id="yt-player-embed"></div>
+            </div>
             {!peerConnected && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-sm">
                 <div className="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4 animate-pulse">
@@ -2508,6 +2550,14 @@ export default function MeetPage() {
                   {ytPlaylistItems.length > 1 && (
                     <span className="text-[10px] text-gray-500 flex-shrink-0">{ytCurrentIndex + 1}/{ytPlaylistItems.length}</span>
                   )}
+                  {/* Speed */}
+                  <button
+                    onClick={cycleYtSpeed}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors flex-shrink-0"
+                    title="Playback speed"
+                  >
+                    {ytPlaybackRate}x
+                  </button>
                   {/* Stop */}
                   <button
                     onClick={stopYouTube}
@@ -2529,6 +2579,9 @@ export default function MeetPage() {
                   </div>
                   <span className="text-xs text-gray-400 flex-shrink-0 w-10">{formatTime(ytDuration)}</span>
                   <span className="text-xs text-gray-300 truncate max-w-[120px]" title={ytVideoTitle}>{ytVideoTitle || 'YouTube'}</span>
+                  {ytPlaybackRate !== 1 && (
+                    <span className="text-[10px] text-gray-500 flex-shrink-0">{ytPlaybackRate}x</span>
+                  )}
                 </>
               )}
             </>

@@ -85,7 +85,7 @@ export function parseYouTubeURL(url) {
  * @param {function} opts.onError
  * @returns {YT.Player}
  */
-export function createYTPlayer(elementId, { videoId, listId, onReady, onStateChange, onError } = {}) {
+export function createYTPlayer(elementId, { videoId, listId, visible = false, onReady, onStateChange, onError } = {}) {
   const playerVars = {
     autoplay: 1,        // Start playing as soon as ready
     controls: 0,        // We provide our own UI
@@ -101,8 +101,8 @@ export function createYTPlayer(elementId, { videoId, listId, onReady, onStateCha
   }
 
   const opts = {
-    height: '1',
-    width: '1',
+    height: visible ? '100%' : '1',
+    width: visible ? '100%' : '1',
     playerVars,
     events: {
       onReady: onReady || (() => {}),
