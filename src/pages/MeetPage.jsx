@@ -5,6 +5,7 @@ import {
   FaMusic, FaPlay, FaPause, FaPhone, FaCopy, FaCheck, FaSignInAlt,
   FaStepBackward, FaStepForward, FaListUl, FaSave, FaTrash,
   FaPlus, FaTimes, FaCircle, FaStop, FaEdit, FaHistory, FaDesktop,
+  FaVolumeUp, FaVolumeMute,
 } from 'react-icons/fa'
 import { supabase } from '../lib/supabase'
 import {
@@ -53,8 +54,10 @@ export default function MeetPage() {
   // Media state
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const [speakerEnabled, setSpeakerEnabled] = useState(true)
   const [audioBlocked, setAudioBlocked] = useState(false)
   const [isScreenSharing, setIsScreenSharing] = useState(false)
+  const [showHangUpDialog, setShowHangUpDialog] = useState(false)
   const screenStreamRef = useRef(null)
 
   // Playlist state
@@ -70,8 +73,6 @@ export default function MeetPage() {
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
-  const [showTopicInput, setShowTopicInput] = useState(false)
-  const [meetingTopic, setMeetingTopic] = useState('')
   const [processingState, setProcessingState] = useState('') // '' | 'transcribing' | 'summarizing' | 'saving' | 'done' | 'error'
   const [meetingSummary, setMeetingSummary] = useState(null)
   const [summaryError, setSummaryError] = useState('')
@@ -155,6 +156,13 @@ export default function MeetPage() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  // Sync speaker state with remote audio element
+  useEffect(() => {
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.muted = !speakerEnabled
+    }
+  }, [speakerEnabled])
 
   async function fetchUserRole(userId) {
     try {
@@ -830,11 +838,11 @@ export default function MeetPage() {
   // ─── Recording ──────────────────────────────────────────────────────────
 
   function startRecording() {
-    setShowTopicInput(true)
+    // 直接开始录音，不弹对话框
+    confirmStartRecording()
   }
 
   function confirmStartRecording() {
-    setShowTopicInput(false)
     setSummaryError('')
     setMeetingSummary(null)
     setProcessingState('')
@@ -893,15 +901,20 @@ export default function MeetPage() {
     if (!user) {
       setProcessingState('error')
       setSummaryError('Please log in to save recordings.')
+      // 3秒后自动隐藏错误状态
+      setTimeout(() => setProcessingState(''), 3000)
       return
     }
+
+    // 设置处理中状态（不弹对话框）
+    setProcessingState('processing')
 
     // Save pending record immediately, process async in background
     try {
       const record = await saveAndProcessRecording({
         userId: user.id,
         roomId,
-        topic: meetingTopic || null,
+        topic: '', // 空字符串，由函数生成默认名称
         durationSeconds,
         audioBlob: blob,
         onUpdate: (updated) => {
@@ -916,6 +929,13 @@ export default function MeetPage() {
               }
               return prev
             })
+            // 完成后显示"完成"状态3秒
+            setProcessingState('done')
+            setTimeout(() => setProcessingState(''), 3000)
+          } else if (updated.summary?.status === 'error') {
+            setProcessingState('error')
+            setSummaryError(updated.summary.error || 'Processing failed')
+            setTimeout(() => setProcessingState(''), 5000)
           }
         },
       })
@@ -923,8 +943,6 @@ export default function MeetPage() {
       // Add to recordings list immediately
       setRecordings(prev => [record, ...prev])
       setEditingRecording(record)
-      setProcessingState('done')
-      setMeetingSummary({ ...record.summary, transcript: '', _recordId: record.id })
 
       // Start polling for completion
       pollRecordingStatus(record.id)
@@ -932,6 +950,7 @@ export default function MeetPage() {
       console.error('Failed to save recording:', err)
       setProcessingState('error')
       setSummaryError(err.message || 'Failed to save recording')
+      setTimeout(() => setProcessingState(''), 5000)
     }
   }
 
@@ -1085,6 +1104,14 @@ export default function MeetPage() {
     }
   }
 
+  function toggleSpeaker() {
+    if (remoteAudioRef.current) {
+      const newState = !speakerEnabled
+      remoteAudioRef.current.muted = !newState
+      setSpeakerEnabled(newState)
+    }
+  }
+
   // 屏幕共享功能
   async function toggleScreenShare() {
     if (isScreenSharing) {
@@ -1162,6 +1189,26 @@ export default function MeetPage() {
     } catch (err) {
       console.error('Failed to stop screen share:', err)
     }
+  }
+
+  function requestHangUp() {
+    setShowHangUpDialog(true)
+  }
+
+  async function confirmHangUp() {
+    setShowHangUpDialog(false)
+
+    // 如果正在录音，先停止录音
+    if (isRecording) {
+      await stopRecording()
+    }
+
+    // 调用原有的 hangUp 逻辑
+    hangUp()
+  }
+
+  function cancelHangUp() {
+    setShowHangUpDialog(false)
   }
 
   function hangUp() {
@@ -1410,7 +1457,7 @@ export default function MeetPage() {
 
   // ─── Meeting view - 优雅专业的会议界面 ─────────────────────────────────
   return (
-    <div className="h-screen meet-bg-dark flex flex-col relative overflow-hidden">
+    <div className="meet-bg-dark flex flex-col relative overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
       {/* Ambient background effects */}
       <div className="absolute inset-0 opacity-10 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-500/30 rounded-full blur-3xl" />
@@ -1803,6 +1850,22 @@ export default function MeetPage() {
             </span>
           </button>
 
+          {/* Speaker Control - 扬声器控制 */}
+          <button
+            onClick={toggleSpeaker}
+            className={`group relative p-5 rounded-2xl transition-all duration-300 transform hover:scale-110 ${
+              speakerEnabled
+                ? 'bg-slate-700/80 hover:bg-slate-600/80 text-white shadow-lg hover:shadow-xl'
+                : 'bg-red-500/90 hover:bg-red-600/90 text-white shadow-lg shadow-red-500/30'
+            }`}
+            title={speakerEnabled ? '静音扬声器' : '开启扬声器'}
+          >
+            {speakerEnabled ? <FaVolumeUp size={20} /> : <FaVolumeMute size={20} />}
+            <span className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              {speakerEnabled ? '静音扬声器' : '开启扬声器'}
+            </span>
+          </button>
+
           {/* Video Control */}
           <button
             onClick={toggleVideo}
@@ -1894,12 +1957,36 @@ export default function MeetPage() {
             </>
           )}
 
+          {/* Processing Indicator - 处理状态指示器 */}
+          {!isRecording && processingState && processingState !== '' && (
+            <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-black/60 backdrop-blur-sm border-2 border-white/10 shadow-lg">
+              {processingState === 'processing' && (
+                <>
+                  <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse" />
+                  <span className="text-sm font-medium text-white">处理中...</span>
+                </>
+              )}
+              {processingState === 'done' && (
+                <>
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <span className="text-sm font-medium text-white">处理完成</span>
+                </>
+              )}
+              {processingState === 'error' && (
+                <>
+                  <div className="w-3 h-3 rounded-full bg-red-500" />
+                  <span className="text-sm font-medium text-white">处理失败</span>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Divider */}
           <div className="w-px h-10 bg-slate-700/50 mx-2" />
 
           {/* Hang Up Button - 醒目设计 */}
           <button
-            onClick={hangUp}
+            onClick={requestHangUp}
             className="group relative p-5 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white transition-all duration-300 shadow-lg shadow-red-500/40 hover:shadow-xl transform hover:scale-110"
             title="结束通话"
           >
@@ -1910,39 +1997,6 @@ export default function MeetPage() {
           </button>
         </div>
       </div>
-
-      {/* Topic input modal */}
-      {showTopicInput && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl border border-gray-700">
-            <h3 className="text-white font-semibold mb-1">Start Recording</h3>
-            <p className="text-gray-400 text-sm mb-4">Optionally set a meeting topic for better summaries.</p>
-            <input
-              type="text"
-              value={meetingTopic}
-              onChange={(e) => setMeetingTopic(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && confirmStartRecording()}
-              placeholder="Meeting topic (optional)"
-              className="w-full px-4 py-2.5 rounded-xl bg-gray-700 border border-gray-600 text-white placeholder-gray-500 outline-none focus:border-primary-500 mb-4"
-              autoFocus
-            />
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setShowTopicInput(false); setMeetingTopic('') }}
-                className="flex-1 px-4 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmStartRecording}
-                className="flex-1 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium transition-colors flex items-center justify-center gap-2"
-              >
-                <FaCircle size={10} /> Record
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Error state (save failed, no record created) */}
       {processingState === 'error' && !meetingSummary && (
@@ -2236,6 +2290,44 @@ export default function MeetPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 停止会议确认对话框 */}
+      {showHangUpDialog && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-red-100 rounded-full">
+                <FaPhone className="text-red-600 text-xl rotate-[135deg]" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">
+                结束会议
+              </h3>
+            </div>
+
+            <p className="text-gray-600 mb-6 leading-relaxed">
+              {isRecording
+                ? '当前正在录音，结束会议将自动停止并保存录音。确定要结束会议吗？'
+                : '确定要结束会议吗？'
+              }
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={cancelHangUp}
+                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmHangUp}
+                className="px-6 py-3 text-white bg-red-500 rounded-xl hover:bg-red-600 transition-colors font-medium shadow-lg shadow-red-500/30"
+              >
+                确定结束
+              </button>
             </div>
           </div>
         </div>

@@ -32,8 +32,8 @@ function App() {
       <Route path="/articles/:slug" element={<MainLayout><ArticleDetailPage /></MainLayout>} />
 
       {/* Meet Routes */}
-      <Route path="/meet" element={<MeetPage />} />
-      <Route path="/meet/:id" element={<MeetPage />} />
+      <Route path="/meet" element={<MainLayout><MeetPage /></MainLayout>} />
+      <Route path="/meet/:id" element={<MainLayout><MeetPage /></MainLayout>} />
 
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />

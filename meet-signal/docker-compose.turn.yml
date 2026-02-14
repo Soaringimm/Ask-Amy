@@ -1,0 +1,9 @@
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: meet-coturn
+    network_mode: host          # 必须用 host 网络，TURN 需要真实 IP
+    restart: unless-stopped
+    volumes:
+      - ./turnserver.conf:/etc/turnserver.conf:ro
+    command: ["-c", "/etc/turnserver.conf"]

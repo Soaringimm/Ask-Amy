@@ -114,15 +114,18 @@ export async function summarizeMeeting(transcript, topic) {
  * Returns the saved record immediately. Calls onUpdate when processing completes/fails.
  */
 export async function saveAndProcessRecording({ userId, roomId, topic, durationSeconds, audioBlob, onUpdate }) {
+  // 生成默认 topic: roomId_timestamp
+  const defaultTopic = topic || `${roomId}_${Date.now()}`
+
   // 1. Save pending record immediately
   const { data: record, error } = await supabase
     .from('aa_meet_recordings')
     .insert({
       user_id: userId,
       room_id: roomId,
-      topic,
+      topic: defaultTopic, // 使用生成的默认名称
       duration_seconds: durationSeconds,
-      summary: { status: 'processing', title: topic || 'Processing...', keyPoints: [], actionItems: [], decisions: [], summary: '' },
+      summary: { status: 'processing', title: defaultTopic, keyPoints: [], actionItems: [], decisions: [], summary: '' },
     })
     .select()
     .single()
@@ -130,7 +133,7 @@ export async function saveAndProcessRecording({ userId, roomId, topic, durationS
   if (error) throw error
 
   // 2. Process in background (not awaited by caller)
-  processInBackground(record.id, audioBlob, topic, onUpdate)
+  processInBackground(record.id, audioBlob, defaultTopic, onUpdate)
 
   return record
 }
