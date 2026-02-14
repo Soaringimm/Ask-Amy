@@ -87,8 +87,8 @@ export function parseYouTubeURL(url) {
  */
 export function createYTPlayer(elementId, { videoId, listId, onReady, onStateChange, onError } = {}) {
   const playerVars = {
-    autoplay: 0,
-    controls: 0,       // We provide our own UI
+    autoplay: 1,        // Start playing as soon as ready
+    controls: 0,        // We provide our own UI
     modestbranding: 1,
     rel: 0,
     playsinline: 1,

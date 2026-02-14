@@ -833,20 +833,20 @@ export default function MeetPage() {
         listId: parsed.listId,
         onReady: () => {
           setYtLoading(false)
-          // Get playlist items if available
+          // Playlist info may not be available yet for playlist-only URLs.
+          // It will be populated in handleYtStateChange when PLAYING fires.
           const pl = player.getPlaylist?.()
           if (pl && pl.length > 0) {
             setYtPlaylistItems(pl.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
             setYtCurrentIndex(player.getPlaylistIndex?.() ?? 0)
-          } else {
-            setYtPlaylistItems([])
-            setYtCurrentIndex(0)
           }
-          setYtDuration(player.getDuration?.() || 0)
+          const dur = player.getDuration?.()
+          if (dur > 0) setYtDuration(dur)
           const data = player.getVideoData?.()
           if (data?.title) setYtVideoTitle(data.title)
 
-          // Auto-play after loading
+          // autoplay:1 in playerVars handles playback start;
+          // also call playVideo() as fallback for browsers that block autoplay
           player.playVideo()
 
           // Tell peer to load the same URL
@@ -863,13 +863,19 @@ export default function MeetPage() {
         onError: (code) => {
           console.error('[YT] player error:', code)
           setYtLoading(false)
-          setError('YouTube playback error')
+          // Reset YouTube mode on error so UI doesn't get stuck
+          setYtMode(false)
+          setYtVideoTitle('')
+          setIsYtHost(false)
+          setError('YouTube playback error (code: ' + code + ')')
         },
       })
       ytPlayerRef.current = player
     } catch (err) {
       console.error('[YT] load error:', err)
       setYtLoading(false)
+      setYtMode(false)
+      setIsYtHost(false)
       setError('Failed to load YouTube player')
     }
   }
@@ -998,12 +1004,15 @@ export default function MeetPage() {
         onError: (code) => {
           console.error('[YT peer] player error:', code)
           setYtLoading(false)
+          setYtMode(false)
+          setIsYtHost(false)
         },
       })
       ytPlayerRef.current = player
     } catch (err) {
       console.error('[YT peer] load error:', err)
       setYtLoading(false)
+      setYtMode(false)
     }
   }
 
