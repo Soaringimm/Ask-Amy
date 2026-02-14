@@ -1807,16 +1807,8 @@ export default function MeetPage() {
             </>
           )}
 
-          {/* Either user can load music when nothing loaded */}
-          {!isMusicHost && playlist.length === 0 && (!user || savedPlaylists.length === 0) && (
-            <label className="cursor-pointer px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors ml-auto">
-              Load Music
-              <input type="file" accept="audio/*" multiple onChange={handleMusicFiles} className="hidden" />
-            </label>
-          )}
-
-          {/* Playlist panel toggle */}
-          {(playlist.length > 0 || (user && savedPlaylists.length > 0)) && (
+          {/* Playlist panel toggle - 只有会议创建者可以管理音乐 */}
+          {!urlRoomId && (playlist.length > 0 || (user && savedPlaylists.length > 0)) && (
             <button
               onClick={() => setShowPlaylistPanel(p => !p)}
               className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${

@@ -168,14 +168,16 @@ export default function MainLayout({ children }) {
                           <FaHeart className="mr-3 text-gray-400" />
                           我的收藏
                         </Link>
-                        <Link
-                          to="/recordings"
-                          onClick={() => setShowUserMenu(false)}
-                          className="flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors"
-                        >
-                          <FaVideo className="mr-3 text-gray-400" />
-                          会议记录
-                        </Link>
+                        {isAdmin && (
+                          <Link
+                            to="/recordings"
+                            onClick={() => setShowUserMenu(false)}
+                            className="flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                          >
+                            <FaVideo className="mr-3 text-gray-400" />
+                            会议记录
+                          </Link>
+                        )}
                         {isAdmin && (
                           <Link
                             to="/admin/dashboard"
