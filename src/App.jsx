@@ -11,6 +11,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import ProfilePage from './pages/ProfilePage'
 import FavoritesPage from './pages/FavoritesPage'
+import RecordingsPage from './pages/RecordingsPage'
 import MeetPage from './pages/MeetPage'
 import AdminLogin from './pages/AdminLogin'
 import AdminDashboard from './pages/AdminDashboard'
@@ -55,6 +56,14 @@ function App() {
         element={
           <UserRoute>
             <MainLayout><FavoritesPage /></MainLayout>
+          </UserRoute>
+        }
+      />
+      <Route
+        path="/recordings"
+        element={
+          <UserRoute>
+            <MainLayout><RecordingsPage /></MainLayout>
           </UserRoute>
         }
       />
