@@ -1,18 +1,74 @@
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createClient } from '@supabase/supabase-js';
+import Busboy from 'busboy';
 
 const PORT = 3100;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const TURN_SERVER_URL = process.env.TURN_SERVER_URL || '';
+const TURN_USERNAME = process.env.TURN_USERNAME || '';
+const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
+
 const rooms = new Map(); // roomId -> Set<socketId>
 
-// Gemini clients
+// Gemini client
 let genAI = null;
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 }
 
-// Helper: collect request body as Buffer
+// Supabase admin client for auth verification
+let supabaseAdmin = null;
+if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+  supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+}
+
+// ─── Auth middleware ────────────────────────────────────────────────────────
+
+/**
+ * Verify Supabase JWT from Authorization header.
+ * Returns user object or null.
+ */
+async function authenticateRequest(req) {
+  if (!supabaseAdmin) {
+    console.warn('[auth] Supabase not configured, skipping auth');
+    return null;
+  }
+
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.slice(7);
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return null;
+    return user;
+  } catch (err) {
+    console.error('[auth] Token verification failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Middleware: require authentication. Sends 401 if not authenticated.
+ * Returns user or null (if response was already sent).
+ */
+async function requireAuth(req, res) {
+  const user = await authenticateRequest(req);
+  if (!user) {
+    sendJson(res, 401, { error: 'Authentication required' });
+    return null;
+  }
+  return user;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 function collectBody(req, maxBytes = 50 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -31,36 +87,44 @@ function collectBody(req, maxBytes = 50 * 1024 * 1024) {
   });
 }
 
-// Helper: parse multipart/form-data to extract file and fields
-function parseMultipart(buf, contentType) {
-  const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
-  if (!boundaryMatch) throw new Error('No boundary found');
-  const boundary = '--' + boundaryMatch[1];
-  const parts = [];
-  const str = buf.toString('binary');
-  const segments = str.split(boundary).slice(1); // skip preamble
-  for (const seg of segments) {
-    if (seg.startsWith('--')) break; // end boundary
-    const headerEnd = seg.indexOf('\r\n\r\n');
-    if (headerEnd === -1) continue;
-    const headers = seg.substring(0, headerEnd);
-    const body = seg.substring(headerEnd + 4, seg.length - 2); // strip trailing \r\n
-    const nameMatch = headers.match(/name="([^"]+)"/);
-    const filenameMatch = headers.match(/filename="([^"]+)"/);
-    const ctMatch = headers.match(/Content-Type:\s*([^\r\n]+)/i);
-    if (nameMatch) {
-      parts.push({
-        name: nameMatch[1],
-        filename: filenameMatch?.[1],
-        contentType: ctMatch?.[1],
-        data: filenameMatch ? Buffer.from(body, 'binary') : body,
+/**
+ * Parse multipart/form-data using busboy.
+ * Returns array of { name, filename, contentType, data (Buffer) }.
+ */
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    try {
+      const bb = Busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024 } });
+
+      bb.on('file', (name, stream, info) => {
+        const { filename, mimeType } = info;
+        const chunks = [];
+        stream.on('data', (chunk) => chunks.push(chunk));
+        stream.on('end', () => {
+          parts.push({
+            name,
+            filename,
+            contentType: mimeType,
+            data: Buffer.concat(chunks),
+          });
+        });
       });
+
+      bb.on('field', (name, value) => {
+        parts.push({ name, data: value });
+      });
+
+      bb.on('close', () => resolve(parts));
+      bb.on('error', (err) => reject(err));
+
+      req.pipe(bb);
+    } catch (err) {
+      reject(err);
     }
-  }
-  return parts;
+  });
 }
 
-// Helper: send JSON response
 function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
@@ -70,6 +134,7 @@ function sendJson(res, status, data) {
 }
 
 // Retry wrapper for Gemini API calls (handles 429)
+const RETRY_BASE_DELAY_MS = 5000;
 async function callWithRetry(fn, maxRetries = 2) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -77,7 +142,7 @@ async function callWithRetry(fn, maxRetries = 2) {
     } catch (err) {
       const is429 = err.message?.includes('429') || err.message?.includes('Resource exhausted');
       if (is429 && attempt < maxRetries) {
-        const delay = (attempt + 1) * 5000; // 5s, 10s
+        const delay = (attempt + 1) * RETRY_BASE_DELAY_MS;
         console.log(`[retry] 429 hit, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}`);
         await new Promise(r => setTimeout(r, delay));
         continue;
@@ -87,27 +152,52 @@ async function callWithRetry(fn, maxRetries = 2) {
   }
 }
 
+// ─── API Handlers ───────────────────────────────────────────────────────────
+
+// GET /api/meet/ice-servers — return TURN credentials
+async function handleIceServers(req, res) {
+  const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+
+  // Add TURN server if configured
+  if (TURN_SERVER_URL && TURN_USERNAME && TURN_CREDENTIAL) {
+    iceServers.push({
+      urls: TURN_SERVER_URL,
+      username: TURN_USERNAME,
+      credential: TURN_CREDENTIAL,
+    });
+  }
+
+  sendJson(res, 200, { iceServers });
+}
+
 // POST /api/meet/transcribe — receive audio, return transcript
 async function handleTranscribe(req, res) {
+  // Require authentication
+  const user = await requireAuth(req, res);
+  if (!user) return;
+
   if (!genAI) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured' });
 
   try {
-    const body = await collectBody(req);
     const ct = req.headers['content-type'] || '';
-
     let audioData, mimeType;
+
     if (ct.includes('multipart/form-data')) {
-      const parts = parseMultipart(body, ct);
+      const parts = await parseMultipart(req);
       const filePart = parts.find(p => p.filename);
       if (!filePart) return sendJson(res, 400, { error: 'No audio file in request' });
       audioData = filePart.data;
       mimeType = filePart.contentType || 'audio/webm';
     } else {
+      const body = await collectBody(req);
       audioData = body;
       mimeType = ct || 'audio/webm';
     }
 
-    console.log(`[transcribe] audio size=${audioData.length}, mime=${mimeType}`);
+    console.log(`[transcribe] user=${user.id}, audio size=${audioData.length}, mime=${mimeType}`);
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
     const result = await callWithRetry(() =>
@@ -141,6 +231,10 @@ Rules:
 
 // POST /api/meet/summarize — receive transcript + topic, return structured summary
 async function handleSummarize(req, res) {
+  // Require authentication
+  const user = await requireAuth(req, res);
+  if (!user) return;
+
   if (!genAI) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured' });
 
   try {
@@ -149,7 +243,7 @@ async function handleSummarize(req, res) {
 
     if (!transcript) return sendJson(res, 400, { error: 'transcript is required' });
 
-    console.log(`[summarize] transcript length=${transcript.length}, topic=${topic || '(none)'}`);
+    console.log(`[summarize] user=${user.id}, transcript length=${transcript.length}, topic=${topic || '(none)'}`);
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
     const result = await callWithRetry(() =>
@@ -180,7 +274,6 @@ ${transcript}`,
     );
 
     const text = result.response.text().trim();
-    // Extract JSON from response (handle markdown code blocks)
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return sendJson(res, 500, { error: 'Failed to parse summary response' });
@@ -194,13 +287,15 @@ ${transcript}`,
   }
 }
 
+// ─── HTTP Server ────────────────────────────────────────────────────────────
+
 const httpServer = createServer((req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
     });
     res.end();
@@ -210,6 +305,11 @@ const httpServer = createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/meet/ice-servers') {
+    handleIceServers(req, res);
     return;
   }
 
@@ -226,6 +326,8 @@ const httpServer = createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
+
+// ─── Socket.IO ──────────────────────────────────────────────────────────────
 
 const io = new Server(httpServer, {
   cors: { origin: '*' },
@@ -244,7 +346,6 @@ function generateRoomId() {
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id}`);
 
-  // Create a new room
   socket.on('create-room', (callback) => {
     let roomId = generateRoomId();
     while (rooms.has(roomId)) {
@@ -257,7 +358,6 @@ io.on('connection', (socket) => {
     callback({ roomId });
   });
 
-  // Join an existing room
   socket.on('join-room', (roomId, callback) => {
     roomId = roomId.toUpperCase().trim();
     const room = rooms.get(roomId);
@@ -275,18 +375,15 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     socket.data.roomId = roomId;
 
-    // Notify the other peer
     socket.to(roomId).emit('peer-joined', socket.id);
     console.log(`[join] room=${roomId} by ${socket.id}, size=${room.size}`);
     callback({ ok: true });
   });
 
-  // WebRTC signaling relay
   socket.on('signal', ({ to, data }) => {
     io.to(to).emit('signal', { from: socket.id, data });
   });
 
-  // Music sync relay
   socket.on('music-sync', (payload) => {
     const { roomId } = socket.data;
     if (roomId) {

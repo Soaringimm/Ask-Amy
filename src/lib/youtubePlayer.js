@@ -22,11 +22,15 @@ export function loadYouTubeAPI() {
     tag.src = 'https://www.youtube.com/iframe_api'
     tag.onerror = () => { apiLoading = false; reject(new Error('Failed to load YouTube API')) }
     document.head.appendChild(tag)
+    // Use a namespaced callback to avoid global conflicts with other scripts
+    const prevCallback = window.onYouTubeIframeAPIReady
     window.onYouTubeIframeAPIReady = () => {
       apiReady = true
       apiLoading = false
       apiCallbacks.forEach(cb => cb())
       apiCallbacks.length = 0
+      // Restore any previous handler
+      if (typeof prevCallback === 'function') prevCallback()
     }
   })
 }
@@ -68,7 +72,8 @@ export function parseYouTubeURL(url) {
     }
 
     return null
-  } catch {
+  } catch (err) {
+    console.debug('Failed to parse YouTube URL:', err.message)
     return null
   }
 }

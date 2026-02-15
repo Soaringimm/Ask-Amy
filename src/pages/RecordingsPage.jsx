@@ -26,6 +26,7 @@ export default function RecordingsPage() {
   const [editForm, setEditForm] = useState({})
   const [savingId, setSavingId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null)
 
   useEffect(() => {
     if (user) {
@@ -64,7 +65,7 @@ export default function RecordingsPage() {
     setEditForm({})
   }
 
-  const saveEdit = async (id) => {
+  const handleSaveEdit = async (id) => {
     try {
       setSavingId(id)
       const updated = await updateRecording(id, {
@@ -76,15 +77,17 @@ export default function RecordingsPage() {
       setEditingId(null)
       setEditForm({})
     } catch (err) {
-      console.error('Failed to save:', err)
+      console.error('Failed to save recording edit:', err)
       alert('保存失败，请重试')
     } finally {
       setSavingId(null)
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('确定要删除这条会议记录吗？此操作不可撤销。')) return
+  const confirmDelete = async () => {
+    const id = deleteConfirmId
+    if (!id) return
+    setDeleteConfirmId(null)
 
     try {
       setDeletingId(id)
@@ -92,11 +95,15 @@ export default function RecordingsPage() {
       setRecordings(recordings.filter(r => r.id !== id))
       if (expandedId === id) setExpandedId(null)
     } catch (err) {
-      console.error('Failed to delete:', err)
+      console.error('Failed to delete recording:', err)
       alert('删除失败，请重试')
     } finally {
       setDeletingId(null)
     }
+  }
+
+  const handleDelete = (id) => {
+    setDeleteConfirmId(id)
   }
 
   const formatDuration = (seconds) => {
@@ -263,7 +270,7 @@ export default function RecordingsPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                saveEdit(recording.id)
+                                handleSaveEdit(recording.id)
                               }}
                               disabled={isSaving}
                               className="p-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:bg-gray-400"
@@ -541,6 +548,25 @@ export default function RecordingsPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-red-100 rounded-full">
+                <FaTrash className="text-red-600 text-xl" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">删除会议记录</h3>
+            </div>
+            <p className="text-gray-600 mb-6 leading-relaxed">确定要删除这条会议记录吗？此操作不可撤销。</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setDeleteConfirmId(null)} className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors font-medium">取消</button>
+              <button onClick={confirmDelete} className="px-6 py-3 text-white bg-red-500 rounded-xl hover:bg-red-600 transition-colors font-medium shadow-lg shadow-red-500/30">确定删除</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Inline Animations */}
       <style>{`

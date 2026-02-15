@@ -70,14 +70,27 @@ export function createMeetRecorder(mixedStream) {
 }
 
 /**
+ * Get the current Supabase auth token for API requests.
+ */
+async function getAuthToken() {
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token || null
+}
+
+/**
  * Send audio blob to server for transcription.
  */
 export async function transcribeAudio(blob) {
+  const token = await getAuthToken()
   const formData = new FormData()
   formData.append('audio', blob, 'recording.webm')
 
+  const headers = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
   const res = await fetch('/api/meet/transcribe', {
     method: 'POST',
+    headers,
     body: formData,
   })
 
@@ -94,9 +107,13 @@ export async function transcribeAudio(blob) {
  * Send transcript to server for structured summary.
  */
 export async function summarizeMeeting(transcript, topic) {
+  const token = await getAuthToken()
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
   const res = await fetch('/api/meet/summarize', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ transcript, topic }),
   })
 
@@ -168,7 +185,9 @@ async function processInBackground(recordId, audioBlob, topic, onUpdate) {
         summary: { status: 'error', error: err.message, title: topic || 'Error', summary: '', keyPoints: [], actionItems: [], decisions: [] },
       })
       onUpdate?.(updated)
-    } catch { /* ignore update failure */ }
+    } catch (updateErr) {
+      console.error('Failed to update recording with error status:', updateErr)
+    }
   }
 }
 
