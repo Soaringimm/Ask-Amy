@@ -57,6 +57,7 @@ export default function MeetPage() {
   const music = useMusicPlayer({
     socketRef, pcRef, musicStreamDestRef, user, renegotiate,
     ytMode: youtube.ytMode, stopYouTube: youtube.stopYouTube, setActiveTab,
+    speakerEnabled,
   })
 
   const recording = useMeetRecording({ user, roomId, localStreamRef, remoteAudioStreamRef })

@@ -8,7 +8,7 @@ import { MUSIC_RESTART_THRESHOLD } from './constants'
 /**
  * Manages local music playback, playlists, and sync with peer via socket.
  */
-export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, user, renegotiate, ytMode, stopYouTube, setActiveTab }) {
+export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, user, renegotiate, ytMode, stopYouTube, setActiveTab, speakerEnabled }) {
   const [playlist, setPlaylist] = useState([])
   const [currentTrackIndex, setCurrentTrackIndex] = useState(-1)
   const [musicPlaying, setMusicPlaying] = useState(false)
@@ -24,6 +24,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
   const musicStartTimeRef = useRef(0)
   const musicOffsetRef = useRef(0)
   const gainNodeRef = useRef(null)
+  const localGainNodeRef = useRef(null)  // controls local speaker output only (not WebRTC stream)
   const animFrameRef = useRef(null)
   const addMoreInputRef = useRef(null)
 
@@ -69,6 +70,25 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
     }
   }, [musicPlaying, isMusicHost, musicDuration])
 
+  // Mute/unmute local music when speaker toggle changes (does not affect WebRTC stream)
+  useEffect(() => {
+    if (localGainNodeRef.current) {
+      localGainNodeRef.current.gain.value = speakerEnabled === false ? 0 : 1
+    }
+  }, [speakerEnabled])
+
+  // Resume AudioContext when output device changes (e.g. Bluetooth headset disconnected)
+  useEffect(() => {
+    function handleDeviceChange() {
+      const ctx = audioCtxRef.current
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {})
+      }
+    }
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, [])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -93,9 +113,15 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
       const dest = ctx.createMediaStreamDestination()
       musicStreamDestRef.current = dest
       const gain = ctx.createGain()
-      gain.connect(dest)
-      gain.connect(ctx.destination)
+      // localGain controls only the local speaker output; muting it does not affect the WebRTC stream
+      const localGain = ctx.createGain()
+      gain.connect(dest)          // WebRTC stream (always active)
+      gain.connect(localGain)     // local speakers path
+      localGain.connect(ctx.destination)
       gainNodeRef.current = gain
+      localGainNodeRef.current = localGain
+      // Apply current speaker state immediately
+      localGain.gain.value = speakerEnabled === false ? 0 : 1
     }
     return audioCtxRef.current
   }
