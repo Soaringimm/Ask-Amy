@@ -205,6 +205,11 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       } catch (err) {
         console.error('[devicechange] Failed to re-acquire audio:', err)
       }
+
+      // Always try to resume remote audio on the new default output device
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.play().catch(() => {})
+      }
     }
 
     navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
