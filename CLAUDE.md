@@ -1,3 +1,48 @@
+# CLAUDE.md — Git Workflow Rules
+
+## 🔀 必须遵守的 Git 规则
+
+**禁止：**
+- ❌ 直接 push 到 `main` 或 `dev`
+- ❌ 在主 repo 目录里直接开发
+- ❌ `git push --force` 到任何共享分支
+
+**开发流程（Worktree Workflow）：**
+
+```bash
+# 1. 进入项目主 repo
+cd <project-root>
+
+# 2. 拉取最新
+git fetch origin
+
+# 3. 从 origin/dev 创建 worktree
+git worktree add ../<project>-<feature> origin/dev
+
+# 4. 进入 worktree，创建 feature branch
+cd ../<project>-<feature>
+git checkout -b feature/<feature>
+
+# 5. 开发、commit
+git add . && git commit -m "feat: description"
+
+# 6. Push + 创建 PR
+git push origin feature/<feature>
+gh pr create --base dev --title "feat: xxx" --body "..."
+
+# 7. 完成后清理
+cd <project-root>
+git worktree remove ../<project>-<feature>
+```
+
+**关键：**
+- 永远从 `origin/dev` 创建 worktree，不用本地 `dev`
+- 创建前必须 `git fetch origin`
+- Worktree 命名：`<project>-<feature-name>`
+- PR merge 后必须清理 worktree
+
+---
+
 <!-- OPENSPEC:START -->
 # OpenSpec Instructions
 

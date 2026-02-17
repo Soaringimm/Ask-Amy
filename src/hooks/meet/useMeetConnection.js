@@ -32,6 +32,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const peerIdRef = useRef(null)
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
+  const remoteVideoStreamRef = useRef(null)
   const remoteAudioRef = useRef(null)
   const remoteAudioStreamRef = useRef(new MediaStream())
   const localStreamRef = useRef(null)
@@ -246,6 +247,16 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     try {
       await fetchIceServers()
 
+      // Generate or retrieve a stable client ID for connection tracking (grace period)
+      let stableId = user?.id
+      if (!stableId) {
+        stableId = localStorage.getItem('aa_meet_client_id')
+        if (!stableId) {
+          stableId = 'guest_' + Math.random().toString(36).slice(2, 11)
+          localStorage.setItem('aa_meet_client_id', stableId)
+        }
+      }
+
       const io = await loadSocketIO()
       const socket = io(SIGNAL_URL, {
         path: '/socket.io/',
@@ -346,11 +357,11 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       if (localVideoRef.current) localVideoRef.current.srcObject = stream
 
       if (mode === 'create') {
-        socket.emit('create-room', (res) => {
+        socket.emit('create-room', stableId, (res) => {
           if (res.roomId) { setRoomId(res.roomId); setPhase('connected'); window.history.replaceState(null, '', `/meet/${res.roomId}`) }
         })
       } else {
-        socket.emit('join-room', targetRoomId, (res) => {
+        socket.emit('join-room', targetRoomId, stableId, (res) => {
           if (res.error) { setError(res.error === 'Room not found' ? 'Meeting ID not found' : res.error); setPhase('lobby'); return }
           setRoomId(targetRoomId); setPhase('connected'); window.history.replaceState(null, '', `/meet/${targetRoomId}`)
         })
@@ -389,6 +400,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
     pc.ontrack = (e) => {
       if (e.track.kind === 'video') {
+        remoteVideoStreamRef.current = e.streams[0]
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = e.streams[0]
       } else if (e.track.kind === 'audio') {
         remoteAudioStreamRef.current.addTrack(e.track)
@@ -447,19 +459,54 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     socket.emit('signal', { to: peerId, data: offer })
   }
 
-  // Media toggles
-  function toggleVideo() {
-    if (localStreamRef.current) {
-      const vTrack = localStreamRef.current.getVideoTracks()[0]
-      if (vTrack) { vTrack.enabled = !vTrack.enabled; setVideoEnabled(vTrack.enabled) }
+  // Re-bind local video srcObject (call after PiP restore, screen share stop, etc.)
+  function rebindLocalVideo() {
+    const videoEl = localVideoRef.current
+    if (!videoEl) return
+    const stream = isScreenSharing ? screenStreamRef.current : localStreamRef.current
+    if (stream) {
+      if (videoEl.srcObject !== stream) videoEl.srcObject = stream
+      // Ensure playback resumes after browser may have paused it
+      if (videoEl.paused) videoEl.play().catch(() => {})
     }
   }
 
-  function toggleAudio() {
-    if (localStreamRef.current) {
-      const aTrack = localStreamRef.current.getAudioTracks()[0]
-      if (aTrack) { aTrack.enabled = !aTrack.enabled; setAudioEnabled(aTrack.enabled) }
+  // Re-bind remote video srcObject
+  function rebindRemoteVideo() {
+    const videoEl = remoteVideoRef.current
+    if (!videoEl) return
+    const stream = remoteVideoStreamRef.current
+    if (stream) {
+      if (videoEl.srcObject !== stream) videoEl.srcObject = stream
+      if (videoEl.paused) videoEl.play().catch(() => {})
     }
+  }
+
+  // Media toggles
+  function toggleVideo() {
+    const stream = localStreamRef.current
+    if (!stream) return
+    const vTrack = stream.getVideoTracks()[0]
+    if (!vTrack || vTrack.readyState === 'ended') {
+      console.warn('[toggleVideo] No live video track available')
+      return
+    }
+    vTrack.enabled = !vTrack.enabled
+    setVideoEnabled(vTrack.enabled)
+    // Re-bind srcObject in case browser detached it
+    if (vTrack.enabled) rebindLocalVideo()
+  }
+
+  function toggleAudio() {
+    const stream = localStreamRef.current
+    if (!stream) return
+    const aTrack = stream.getAudioTracks()[0]
+    if (!aTrack || aTrack.readyState === 'ended') {
+      console.warn('[toggleAudio] No live audio track available')
+      return
+    }
+    aTrack.enabled = !aTrack.enabled
+    setAudioEnabled(aTrack.enabled)
   }
 
   function toggleSpeaker() {
@@ -538,6 +585,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     // Actions
     initConnection, renegotiate, cleanup,
     toggleVideo, toggleAudio, toggleSpeaker, toggleScreenShare,
+    rebindLocalVideo, rebindRemoteVideo,
     unlockAudio, hangUp, canCreateMeeting,
   }
 }

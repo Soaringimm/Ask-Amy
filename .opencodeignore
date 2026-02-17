@@ -1,0 +1,14 @@
+# OpenCode ignore - reduce memory & indexing overhead
+node_modules/
+.venv/
+venv/
+__pycache__/
+.git/
+dist/
+build/
+.next/
+*.pyc
+*.pyo
+.DS_Store
+*.log
+
