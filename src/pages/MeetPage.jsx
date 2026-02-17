@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
@@ -44,6 +44,7 @@ export default function MeetPage() {
     localStreamRef, musicStreamDestRef,
     initConnection, renegotiate, cleanup,
     toggleVideo, toggleAudio, toggleSpeaker, toggleScreenShare,
+    rebindLocalVideo, rebindRemoteVideo,
     unlockAudio, hangUp,
   } = connection
 
@@ -61,6 +62,15 @@ export default function MeetPage() {
   const recording = useMeetRecording({ user, roomId, localStreamRef, remoteAudioStreamRef })
 
   const pip = usePiP({ ytMode: youtube.ytMode })
+
+  // Re-bind video srcObject after PiP restore (browsers may drop playback on tiny elements)
+  useEffect(() => {
+    if (!pip.localPipMin && phase === 'connected') rebindLocalVideo()
+  }, [pip.localPipMin, phase])
+
+  useEffect(() => {
+    if (!pip.remotePipMin && phase === 'connected') rebindRemoteVideo()
+  }, [pip.remotePipMin, phase])
 
   // Wire up music sync handler
   handleMusicSyncRef.current = (msg) => {
