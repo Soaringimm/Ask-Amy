@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { SIGNAL_URL, RESOLUTIONS } from './constants'
 
@@ -15,6 +16,7 @@ const ICE_RESTART_DELAY_MS = 1500
 const ICE_RESTART_MAX_ATTEMPTS = 3
 
 export default function useMeetConnection({ urlRoomId, videoResolution, onMusicSync }) {
+  const navigate = useNavigate()
   const [phase, setPhase] = useState(urlRoomId ? 'joining' : 'lobby')
   const [roomId, setRoomId] = useState(urlRoomId || '')
   const [error, setError] = useState('')
@@ -44,9 +46,16 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const iceRestartAttemptsRef = useRef(0)
   const iceRestartTimerRef = useRef(null)
   const roomIdRef = useRef('') // track roomId for socket reconnect
+  const audioEnabledRef = useRef(true) // mirror audioEnabled for use in event callbacks
+  const phaseRef = useRef('lobby') // mirror phase for use in event callbacks
+  const onMusicSyncRef = useRef(onMusicSync) // mirror onMusicSync to avoid stale closure in socket listener
+  const initInFlightRef = useRef(false) // guard against concurrent initConnection calls
 
-  // Keep roomIdRef in sync
+  // Keep refs in sync with state/props (for use in callbacks/event listeners)
   useEffect(() => { roomIdRef.current = roomId }, [roomId])
+  useEffect(() => { audioEnabledRef.current = audioEnabled }, [audioEnabled])
+  useEffect(() => { phaseRef.current = phase }, [phase])
+  useEffect(() => { onMusicSyncRef.current = onMusicSync }, [onMusicSync])
 
   // Fetch ICE servers (TURN credentials) from backend
   const fetchIceServers = useCallback(async () => {
@@ -160,6 +169,48 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [phase, isScreenSharing])
 
+  // ─── Bluetooth / audio device change handler ────────────────────────────────
+  // Fires when any audio/video device connects or disconnects (e.g. Bluetooth headset).
+  // If the current microphone track has ended, we re-acquire audio and hot-swap
+  // the track in the RTCPeerConnection without dropping the call.
+  useEffect(() => {
+    async function handleDeviceChange() {
+      if (phaseRef.current !== 'connected') return
+      const stream = localStreamRef.current
+      if (!stream) return
+
+      const audioTrack = stream.getAudioTracks()[0]
+      // Only act if the current track has ended (device disconnected)
+      if (audioTrack && audioTrack.readyState === 'live') return
+
+      console.log('[devicechange] Audio track ended, re-acquiring microphone...')
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const newAudioTrack = newStream.getAudioTracks()[0]
+
+        // Preserve the user's mute state
+        newAudioTrack.enabled = audioEnabledRef.current
+
+        // Swap out the old audio track in the local stream
+        stream.getAudioTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+        stream.addTrack(newAudioTrack)
+
+        // Replace the track in the RTCPeerConnection (no renegotiation needed)
+        if (pcRef.current) {
+          const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio')
+          if (sender) await sender.replaceTrack(newAudioTrack)
+        }
+
+        console.log('[devicechange] Audio track replaced successfully')
+      } catch (err) {
+        console.error('[devicechange] Failed to re-acquire audio:', err)
+      }
+    }
+
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, []) // stable: uses refs, no state deps needed
+
   // Create persistent <audio> element on mount
   useEffect(() => {
     const audio = document.createElement('audio')
@@ -199,10 +250,20 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   function cleanup() {
     if (iceRestartTimerRef.current) { clearTimeout(iceRestartTimerRef.current); iceRestartTimerRef.current = null }
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
-    if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()) }
-    if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()) }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => t.stop())
+      localStreamRef.current = null // (#7) null after stopping so stale refs aren't re-used
+    }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop())
+      screenStreamRef.current = null
+    }
+    // (#8) Clear remote audio tracks in-place instead of replacing the object,
+    // so external hooks holding a reference to the same MediaStream stay valid.
+    remoteAudioStreamRef.current.getTracks().forEach(t => remoteAudioStreamRef.current.removeTrack(t))
     if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
     iceRestartAttemptsRef.current = 0
+    initInFlightRef.current = false
   }
 
   async function loadSocketIO() {
@@ -236,14 +297,25 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   }
 
   async function initConnection(mode, targetRoomId) {
+    // (#1) Prevent concurrent initConnection calls from creating duplicate sockets/PCs.
+    // Clean up any previous connection before starting fresh.
+    if (initInFlightRef.current) {
+      console.warn('[initConnection] already in flight, ignoring duplicate call')
+      return
+    }
+    if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
+    initInFlightRef.current = true
+
     setError('')
     setAudioBlocked(false)
 
     if (mode === 'create') {
       const { allowed, reason } = canCreateMeeting()
-      if (!allowed) { setError(reason); setPhase('lobby'); return }
+      if (!allowed) { setError(reason); setPhase('lobby'); initInFlightRef.current = false; return }
     }
 
+    let stream = null // (#2) Track stream so we can stop tracks in catch block
     try {
       await fetchIceServers()
 
@@ -304,7 +376,8 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         console.log('[peer-left] Peer disconnected, waiting for rejoin...')
         setPeerConnected(false)
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
-        remoteAudioStreamRef.current = new MediaStream()
+        // (#8) Clear in-place to keep external hook references valid
+        remoteAudioStreamRef.current.getTracks().forEach(t => remoteAudioStreamRef.current.removeTrack(t))
         if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
         if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
         remoteDescSetRef.current = false
@@ -314,16 +387,24 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         // so the peer can rejoin and we get a new 'peer-joined' event.
       })
 
-      socket.on('music-sync', (msg) => onMusicSync?.(msg))
+      socket.on('music-sync', (msg) => onMusicSyncRef.current?.(msg)) // (#4) use ref to avoid stale closure
 
       socket.on('connect_error', (err) => {
         console.error('[socket] connect_error:', err.message)
         // Don't immediately bail to lobby — socket.io will auto-reconnect
       })
 
-      // Handle socket.io reconnect — re-join the room
+      // Handle socket.io reconnect — reset signaling state and re-join the room
       socket.on('reconnect', () => {
         console.log('[socket] Reconnected, re-joining room...')
+        // (#5) Reset signaling state to avoid InvalidStateError on re-offer
+        if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
+        remoteDescSetRef.current = false
+        pendingCandidatesRef.current = []
+        peerIdRef.current = null
+        iceRestartAttemptsRef.current = 0
+        setPeerConnected(false)
+
         const rid = roomIdRef.current
         if (rid) {
           socket.emit('join-room', rid, (res) => {
@@ -345,15 +426,19 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         setPhase('lobby')
       })
 
-      const [stream] = await Promise.all([
+      ;[stream] = await Promise.all([
         navigator.mediaDevices.getUserMedia({ video: getVideoConstraints(), audio: true }),
-        new Promise((resolve) => {
-          if (socket.connected) resolve()
-          else socket.on('connect', () => resolve())
+        // (#3) Socket connect with timeout + reject path — prevents initConnection hanging forever
+        new Promise((resolve, reject) => {
+          if (socket.connected) { resolve(); return }
+          const timer = setTimeout(() => reject(new Error('Signal server connection timed out')), 10000)
+          socket.once('connect', () => { clearTimeout(timer); resolve() })
+          socket.once('connect_error', (err) => { clearTimeout(timer); reject(err) })
         }),
       ])
 
       localStreamRef.current = stream
+      initInFlightRef.current = false // connection established, allow future re-init
       if (localVideoRef.current) localVideoRef.current.srcObject = stream
 
       if (mode === 'create') {
@@ -367,6 +452,10 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         })
       }
     } catch (err) {
+      // (#2) Stop camera/mic tracks if getUserMedia succeeded before the failure
+      if (stream) stream.getTracks().forEach(t => t.stop())
+      if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
+      initInFlightRef.current = false
       setError(err.message || 'Failed to get camera/mic access')
       setPhase('lobby')
     }
@@ -396,7 +485,8 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       musicStreamDestRef.current.stream.getTracks().forEach(track => pc.addTrack(track, musicStreamDestRef.current.stream))
     }
 
-    remoteAudioStreamRef.current = new MediaStream()
+    // (#8) Clear existing remote audio tracks in-place to keep external refs valid
+    remoteAudioStreamRef.current.getTracks().forEach(t => remoteAudioStreamRef.current.removeTrack(t))
 
     pc.ontrack = (e) => {
       if (e.track.kind === 'video') {
@@ -447,7 +537,12 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
 
     if (isInitiator) {
-      pc.createOffer().then(offer => { pc.setLocalDescription(offer); socket.emit('signal', { to: peerId, data: offer }) })
+      // (#6) Await setLocalDescription before emitting; add catch for silent failures
+      pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer).then(() => {
+          socket.emit('signal', { to: peerId, data: offer })
+        }))
+        .catch(err => console.error('[WebRTC] createOffer/setLocalDescription failed:', err))
     }
   }
 
@@ -571,7 +666,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
   function hangUp() {
     cleanup()
-    window.location.href = '/meet'
+    navigate('/meet') // (#10) Use React Router navigate instead of window.location.href
   }
 
   return {

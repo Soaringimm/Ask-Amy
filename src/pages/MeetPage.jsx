@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
@@ -29,7 +29,7 @@ export default function MeetPage() {
   const [showHangUpDialog, setShowHangUpDialog] = useState(false)
 
   // ─── Music sync handler (needs to be defined before hooks that use it) ───
-  const handleMusicSyncRef = { current: null }
+  const handleMusicSyncRef = useRef(null) // Must be useRef, not a plain object literal
   const onMusicSync = useCallback((msg) => {
     handleMusicSyncRef.current?.(msg)
   }, [])
