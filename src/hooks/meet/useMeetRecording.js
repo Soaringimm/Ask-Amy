@@ -34,6 +34,26 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
   const recordingTimerRef = useRef(null)
   const recordingStartRef = useRef(0)
   const recordingPausedTimeRef = useRef(0)
+  const isMountedRef = useRef(true) // C2: guard against setState after unmount
+  const pollTimerRef = useRef(null) // C2: track polling timer for cancellation
+
+  // C1: Cleanup all recording resources on unmount to prevent leaks
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      clearInterval(recordingTimerRef.current)
+      clearTimeout(pollTimerRef.current)
+      if (recorderRef.current) {
+        try { recorderRef.current.stop() } catch (_) {}
+        recorderRef.current = null
+      }
+      if (recordingMixerCtxRef.current) {
+        recordingMixerCtxRef.current.close()
+        recordingMixerCtxRef.current = null
+      }
+    }
+  }, [])
 
   // Fetch recordings on user change
   useEffect(() => {
@@ -138,10 +158,15 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
   function pollRecordingStatus(recordId) {
     let retries = 0
     const poll = async () => {
+      // C2: stop polling if component has unmounted
+      if (!isMountedRef.current) return
+
       if (retries >= POLLING_MAX_RETRIES) {
         console.warn(`[polling] Max retries (${POLLING_MAX_RETRIES}) reached for recording ${recordId}`)
-        setProcessingState('error')
-        setSummaryError('Processing timed out. Please check back later.')
+        if (isMountedRef.current) {
+          setProcessingState('error')
+          setSummaryError('Processing timed out. Please check back later.')
+        }
         return
       }
       retries++
@@ -151,7 +176,7 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
           .select('*')
           .eq('id', recordId)
           .single()
-        if (!data) return
+        if (!data || !isMountedRef.current) return
 
         if (data.summary?.status !== 'processing') {
           setRecordings(prev => prev.map(r => r.id === data.id ? data : r))
@@ -162,13 +187,17 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
           })
           return
         }
-        setTimeout(poll, POLLING_INTERVAL)
+        if (isMountedRef.current) {
+          pollTimerRef.current = setTimeout(poll, POLLING_INTERVAL)
+        }
       } catch (err) {
         console.error('[polling] Error checking recording status:', err)
-        setTimeout(poll, POLLING_INTERVAL)
+        if (isMountedRef.current) {
+          pollTimerRef.current = setTimeout(poll, POLLING_INTERVAL)
+        }
       }
     }
-    setTimeout(poll, POLLING_INTERVAL)
+    pollTimerRef.current = setTimeout(poll, POLLING_INTERVAL)
   }
 
   function copySummaryText() {

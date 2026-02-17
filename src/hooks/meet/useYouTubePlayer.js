@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { loadYouTubeAPI, parseYouTubeURL, createYTPlayer, YTState } from '../../lib/youtubePlayer'
 import { savePlaylist, getPlaylists, deletePlaylist as deletePlaylistApi } from '../../lib/playlistStorage'
-import { YT_IGNORE_STATE_DELAY, YT_TIME_UPDATE_INTERVAL, YT_PLAYBACK_RATES } from './constants'
+import { YT_IGNORE_STATE_DELAY, YT_TIME_UPDATE_INTERVAL, YT_PLAYBACK_RATES, MUSIC_RESTART_THRESHOLD } from './constants'
 
 /**
  * Manages YouTube player integration and sync.
