@@ -11,6 +11,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const TURN_SERVER_URL = process.env.TURN_SERVER_URL || '';
 const TURN_USERNAME = process.env.TURN_USERNAME || '';
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'http://localhost:5173';
 
 // ─── Process-level error guards (H-4) ───────────────────────────────────────
 // Prevent any unhandled exception from crashing the server and dropping all calls.
@@ -142,7 +143,8 @@ function parseMultipart(req) {
 function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Vary': 'Origin',
   });
   res.end(JSON.stringify(data));
 }
@@ -168,8 +170,11 @@ async function callWithRetry(fn, maxRetries = 2) {
 
 // ─── API Handlers ───────────────────────────────────────────────────────────
 
-// GET /api/meet/ice-servers — return TURN credentials
+// GET /api/meet/ice-servers — return TURN credentials (requires auth to protect TURN creds)
 async function handleIceServers(req, res) {
+  const user = await requireAuth(req, res);
+  if (!user) return;
+
   const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -308,10 +313,11 @@ const httpServer = createServer((req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin',
     });
     res.end();
     return;
@@ -345,7 +351,7 @@ const httpServer = createServer((req, res) => {
 // ─── Socket.IO ──────────────────────────────────────────────────────────────
 
 const io = new Server(httpServer, {
-  cors: { origin: '*' },
+  cors: { origin: ALLOWED_ORIGIN, methods: ['GET', 'POST'] },
   path: '/socket.io/',
   pingInterval: 25000,
   pingTimeout: 60000,
