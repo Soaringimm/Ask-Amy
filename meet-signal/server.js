@@ -13,6 +13,7 @@ const TURN_USERNAME = process.env.TURN_USERNAME || '';
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
 
 const rooms = new Map(); // roomId -> Set<socketId>
+const disconnectTimers = new Map(); // socketId -> timeoutId
 
 // Gemini client
 let genAI = null;
@@ -332,6 +333,8 @@ const httpServer = createServer((req, res) => {
 const io = new Server(httpServer, {
   cors: { origin: '*' },
   path: '/socket.io/',
+  pingInterval: 25000,
+  pingTimeout: 60000,
 });
 
 function generateRoomId() {
@@ -366,9 +369,20 @@ io.on('connection', (socket) => {
       callback({ error: 'Room not found' });
       return;
     }
-    if (room.size >= 2) {
+
+    // Check if the user is reconnecting (within grace period) or joining fresh
+    // If they were already in the room's Set (via the 30s timer not having expired),
+    // they don't count towards the "size >= 2" limit.
+    if (!room.has(socket.id) && room.size >= 2) {
       callback({ error: 'Room is full (max 2)' });
       return;
+    }
+
+    // Clear any existing disconnect timer for this socket
+    if (disconnectTimers.has(socket.id)) {
+      clearTimeout(disconnectTimers.get(socket.id));
+      disconnectTimers.delete(socket.id);
+      console.log(`[reconnect] ${socket.id} joined room=${roomId} within grace period`);
     }
 
     room.add(socket.id);
@@ -395,16 +409,27 @@ io.on('connection', (socket) => {
     const { roomId } = socket.data;
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
-      room.delete(socket.id);
-      if (room.size === 0) {
-        rooms.delete(roomId);
-        console.log(`[delete] room=${roomId} (empty)`);
-      } else {
-        socket.to(roomId).emit('peer-left');
-        console.log(`[leave] room=${roomId} by ${socket.id}`);
-      }
+      
+      // Use a grace period (30s) before final cleanup to allow for quick reconnections
+      const timerId = setTimeout(() => {
+        disconnectTimers.delete(socket.id);
+        if (room.has(socket.id)) {
+          room.delete(socket.id);
+          if (room.size === 0) {
+            rooms.delete(roomId);
+            console.log(`[delete] room=${roomId} (after grace)`);
+          } else {
+            io.to(roomId).emit('peer-left');
+            console.log(`[leave] room=${roomId} by ${socket.id} (after grace)`);
+          }
+        }
+      }, 30000);
+
+      disconnectTimers.set(socket.id, timerId);
+      console.log(`[disconnect-pending] ${socket.id} in ${roomId}, waiting 30s grace...`);
+    } else {
+      console.log(`[disconnect] ${socket.id}`);
     }
-    console.log(`[disconnect] ${socket.id}`);
   });
 });
 
