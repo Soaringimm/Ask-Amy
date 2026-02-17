@@ -13,7 +13,9 @@ const TURN_USERNAME = process.env.TURN_USERNAME || '';
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
 
 const rooms = new Map(); // roomId -> Set<socketId>
-const disconnectTimers = new Map(); // socketId -> timeoutId
+const disconnectTimers = new Map(); // stableId -> timeoutId
+const socketToStableId = new Map(); // socketId -> stableId
+const stableIdToRoom = new Map(); // stableId -> roomId
 
 // Gemini client
 let genAI = null;
@@ -349,19 +351,36 @@ function generateRoomId() {
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id}`);
 
-  socket.on('create-room', (callback) => {
+  socket.on('create-room', (stableId, callback) => {
+    // If only one arg provided, it might be the callback
+    if (typeof stableId === 'function') {
+      callback = stableId;
+      stableId = socket.id;
+    }
+
     let roomId = generateRoomId();
     while (rooms.has(roomId)) {
       roomId = generateRoomId();
     }
     rooms.set(roomId, new Set([socket.id]));
+    socketToStableId.set(socket.id, stableId);
+    stableIdToRoom.set(stableId, roomId);
+
     socket.join(roomId);
     socket.data.roomId = roomId;
-    console.log(`[create] room=${roomId} by ${socket.id}`);
+    socket.data.stableId = stableId;
+
+    console.log(`[create] room=${roomId} by ${socket.id} (stableId=${stableId})`);
     callback({ roomId });
   });
 
-  socket.on('join-room', (roomId, callback) => {
+  socket.on('join-room', (roomId, stableId, callback) => {
+    // Handle optional stableId for backward compatibility
+    if (typeof stableId === 'function') {
+      callback = stableId;
+      stableId = socket.id;
+    }
+
     roomId = roomId.toUpperCase().trim();
     const room = rooms.get(roomId);
 
@@ -371,26 +390,31 @@ io.on('connection', (socket) => {
     }
 
     // Check if the user is reconnecting (within grace period) or joining fresh
-    // If they were already in the room's Set (via the 30s timer not having expired),
-    // they don't count towards the "size >= 2" limit.
-    if (!room.has(socket.id) && room.size >= 2) {
+    // If they have a stableId that was previously in this room, they are allowed in
+    const isReconnecting = disconnectTimers.has(stableId) && stableIdToRoom.get(stableId) === roomId;
+
+    if (!isReconnecting && room.size >= 2) {
       callback({ error: 'Room is full (max 2)' });
       return;
     }
 
-    // Clear any existing disconnect timer for this socket
-    if (disconnectTimers.has(socket.id)) {
-      clearTimeout(disconnectTimers.get(socket.id));
-      disconnectTimers.delete(socket.id);
-      console.log(`[reconnect] ${socket.id} joined room=${roomId} within grace period`);
+    // Clear any existing disconnect timer for this stable identity
+    if (disconnectTimers.has(stableId)) {
+      clearTimeout(disconnectTimers.get(stableId));
+      disconnectTimers.delete(stableId);
+      console.log(`[reconnect] ${socket.id} (stableId=${stableId}) resumed room=${roomId} within grace period`);
     }
 
     room.add(socket.id);
+    socketToStableId.set(socket.id, stableId);
+    stableIdToRoom.set(stableId, roomId);
+    
     socket.join(roomId);
     socket.data.roomId = roomId;
+    socket.data.stableId = stableId;
 
     socket.to(roomId).emit('peer-joined', socket.id);
-    console.log(`[join] room=${roomId} by ${socket.id}, size=${room.size}`);
+    console.log(`[join] room=${roomId} by ${socket.id} (stableId=${stableId}), size=${room.size}`);
     callback({ ok: true });
   });
 
@@ -406,29 +430,34 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    const { roomId } = socket.data;
-    if (roomId && rooms.has(roomId)) {
+    const { roomId, stableId } = socket.data;
+    if (roomId && rooms.has(roomId) && stableId) {
       const room = rooms.get(roomId);
       
       // Use a grace period (30s) before final cleanup to allow for quick reconnections
       const timerId = setTimeout(() => {
-        disconnectTimers.delete(socket.id);
+        disconnectTimers.delete(stableId);
+        stableIdToRoom.delete(stableId);
+        
         if (room.has(socket.id)) {
           room.delete(socket.id);
+          socketToStableId.delete(socket.id);
+
           if (room.size === 0) {
             rooms.delete(roomId);
             console.log(`[delete] room=${roomId} (after grace)`);
           } else {
             io.to(roomId).emit('peer-left');
-            console.log(`[leave] room=${roomId} by ${socket.id} (after grace)`);
+            console.log(`[leave] room=${roomId} by ${socket.id} (stableId=${stableId}) (after grace)`);
           }
         }
       }, 30000);
 
-      disconnectTimers.set(socket.id, timerId);
-      console.log(`[disconnect-pending] ${socket.id} in ${roomId}, waiting 30s grace...`);
+      disconnectTimers.set(stableId, timerId);
+      console.log(`[disconnect-pending] ${socket.id} (stableId=${stableId}) in ${roomId}, waiting 30s grace...`);
     } else {
       console.log(`[disconnect] ${socket.id}`);
+      socketToStableId.delete(socket.id);
     }
   });
 });

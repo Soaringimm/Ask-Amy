@@ -23,6 +23,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const peerIdRef = useRef(null)
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
+  const remoteVideoStreamRef = useRef(null)
   const remoteAudioRef = useRef(null)
   const remoteAudioStreamRef = useRef(new MediaStream())
   const localStreamRef = useRef(null)
@@ -166,6 +167,16 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       // Fetch TURN credentials before connecting
       await fetchIceServers()
 
+      // Generate or retrieve a stable client ID for connection tracking (grace period)
+      let stableId = user?.id
+      if (!stableId) {
+        stableId = localStorage.getItem('aa_meet_client_id')
+        if (!stableId) {
+          stableId = 'guest_' + Math.random().toString(36).slice(2, 11)
+          localStorage.setItem('aa_meet_client_id', stableId)
+        }
+      }
+
       const io = await loadSocketIO()
       const socket = io(SIGNAL_URL, { path: '/socket.io/', transports: ['websocket', 'polling'] })
       socketRef.current = socket
@@ -223,11 +234,11 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       if (localVideoRef.current) localVideoRef.current.srcObject = stream
 
       if (mode === 'create') {
-        socket.emit('create-room', (res) => {
+        socket.emit('create-room', stableId, (res) => {
           if (res.roomId) { setRoomId(res.roomId); setPhase('connected'); window.history.replaceState(null, '', `/meet/${res.roomId}`) }
         })
       } else {
-        socket.emit('join-room', targetRoomId, (res) => {
+        socket.emit('join-room', targetRoomId, stableId, (res) => {
           if (res.error) { setError(res.error === 'Room not found' ? 'Meeting ID not found' : res.error); setPhase('lobby'); return }
           setRoomId(targetRoomId); setPhase('connected'); window.history.replaceState(null, '', `/meet/${targetRoomId}`)
         })
@@ -260,6 +271,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
     pc.ontrack = (e) => {
       if (e.track.kind === 'video') {
+        remoteVideoStreamRef.current = e.streams[0]
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = e.streams[0]
       } else if (e.track.kind === 'audio') {
         remoteAudioStreamRef.current.addTrack(e.track)
@@ -307,8 +319,12 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   // Re-bind remote video srcObject
   function rebindRemoteVideo() {
     const videoEl = remoteVideoRef.current
-    if (!videoEl || !videoEl.srcObject) return
-    if (videoEl.paused) videoEl.play().catch(() => {})
+    if (!videoEl) return
+    const stream = remoteVideoStreamRef.current
+    if (stream) {
+      if (videoEl.srcObject !== stream) videoEl.srcObject = stream
+      if (videoEl.paused) videoEl.play().catch(() => {})
+    }
   }
 
   // Media toggles
