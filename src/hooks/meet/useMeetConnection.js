@@ -176,11 +176,16 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   useEffect(() => {
     async function handleDeviceChange() {
       if (phaseRef.current !== 'connected') return
+
+      // Always re-trigger remote audio so it falls back to the new default output device
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.play().catch(() => {})
+      }
+
+      // If mic track has ended, re-acquire microphone
       const stream = localStreamRef.current
       if (!stream) return
-
       const audioTrack = stream.getAudioTracks()[0]
-      // Only act if the current track has ended (device disconnected)
       if (audioTrack && audioTrack.readyState === 'live') return
 
       console.log('[devicechange] Audio track ended, re-acquiring microphone...')
@@ -204,11 +209,6 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         console.log('[devicechange] Audio track replaced successfully')
       } catch (err) {
         console.error('[devicechange] Failed to re-acquire audio:', err)
-      }
-
-      // Always try to resume remote audio on the new default output device
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.play().catch(() => {})
       }
     }
 
