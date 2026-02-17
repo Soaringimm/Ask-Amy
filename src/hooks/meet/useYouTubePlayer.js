@@ -86,6 +86,29 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
     })
   }, [ytPlaylistItems])
 
+  // Resume YouTube playback on new default output device when audio device changes (e.g. BT headset removed)
+  useEffect(() => {
+    function handleDeviceChange() {
+      const p = ytPlayerRef.current
+      if (!p) return
+      try {
+        if (p.getPlayerState() === YTState.PLAYING) {
+          // Brief pause-resume forces the browser to re-route audio to the new default output
+          ytIgnoreStateRef.current = true
+          p.pauseVideo()
+          setTimeout(() => {
+            try { p.playVideo() } catch (e) { console.debug('[YT devicechange] playVideo failed:', e.message) }
+            setTimeout(() => { ytIgnoreStateRef.current = false }, YT_IGNORE_STATE_DELAY)
+          }, 300)
+        }
+      } catch (e) {
+        console.debug('[YT devicechange] state check failed:', e.message)
+      }
+    }
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, [])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
