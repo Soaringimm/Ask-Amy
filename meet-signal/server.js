@@ -12,6 +12,17 @@ const TURN_SERVER_URL = process.env.TURN_SERVER_URL || '';
 const TURN_USERNAME = process.env.TURN_USERNAME || '';
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
 
+// ─── Process-level error guards (H-4) ───────────────────────────────────────
+// Prevent any unhandled exception from crashing the server and dropping all calls.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException] Unexpected error — server continues:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection] Unhandled promise rejection:', reason);
+});
+
+const MAX_ROOMS = 500; // Guard against memory exhaustion (M-3)
+
 const rooms = new Map(); // roomId -> Set<socketId>
 const disconnectTimers = new Map(); // stableId -> timeoutId
 const socketToStableId = new Map(); // socketId -> stableId
@@ -245,6 +256,7 @@ async function handleSummarize(req, res) {
     const { transcript, topic } = JSON.parse(body.toString());
 
     if (!transcript) return sendJson(res, 400, { error: 'transcript is required' });
+    if (transcript.length > 50000) return sendJson(res, 400, { error: 'Transcript too long (max 50000 chars)' });
 
     console.log(`[summarize] user=${user.id}, transcript length=${transcript.length}, topic=${topic || '(none)'}`);
 
@@ -358,6 +370,13 @@ io.on('connection', (socket) => {
       stableId = socket.id;
     }
 
+    // Guard against memory exhaustion (M-3)
+    if (rooms.size >= MAX_ROOMS) {
+      console.warn(`[create] rejected: server at capacity (${rooms.size} rooms)`);
+      callback({ error: 'Server at capacity, try again later' });
+      return;
+    }
+
     let roomId = generateRoomId();
     while (rooms.has(roomId)) {
       roomId = generateRoomId();
@@ -398,10 +417,18 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Clear any existing disconnect timer for this stable identity
+    // Clear any existing disconnect timer and evict the stale socketId (C-2 + H-1 + H-2)
     if (disconnectTimers.has(stableId)) {
       clearTimeout(disconnectTimers.get(stableId));
       disconnectTimers.delete(stableId);
+
+      // Remove the old (now-invalid) socketId entries left behind from the disconnected socket
+      for (const [sid, sId] of socketToStableId) {
+        if (sId === stableId && sid !== socket.id) {
+          room.delete(sid);
+          socketToStableId.delete(sid);
+        }
+      }
       console.log(`[reconnect] ${socket.id} (stableId=${stableId}) resumed room=${roomId} within grace period`);
     }
 
@@ -419,6 +446,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('signal', ({ to, data }) => {
+    // C-1: Verify the target socket is in the same room as the sender.
+    // Without this, any connected socket could signal any other socket.
+    const senderRoomId = socket.data.roomId;
+    if (!senderRoomId) return;
+    const room = rooms.get(senderRoomId);
+    if (!room || !room.has(to)) {
+      console.warn(`[signal] blocked: ${socket.id} -> ${to} (not in same room)`);
+      return;
+    }
     io.to(to).emit('signal', { from: socket.id, data });
   });
 
@@ -434,6 +470,11 @@ io.on('connection', (socket) => {
     if (roomId && rooms.has(roomId) && stableId) {
       const room = rooms.get(roomId);
       
+      // Clear any existing timer for this stableId before creating a new one (H-2)
+      if (disconnectTimers.has(stableId)) {
+        clearTimeout(disconnectTimers.get(stableId));
+      }
+
       // Use a grace period (30s) before final cleanup to allow for quick reconnections
       const timerId = setTimeout(() => {
         disconnectTimers.delete(stableId);
