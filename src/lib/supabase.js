@@ -28,7 +28,7 @@ const clearExpiredSession = () => {
           // Add 60 second buffer - if token expires within 60 seconds, clear it
           const isExpired = Date.now() / 1000 > expiresAt - 60
           if (isExpired) {
-            console.log('Clearing expired session:', key)
+            if (import.meta.env.DEV) console.log('Clearing expired session:', key)
             localStorage.removeItem(key)
           }
         }

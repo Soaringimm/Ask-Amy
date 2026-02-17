@@ -21,6 +21,7 @@ import AdminUsers from './pages/AdminUsers'
 import AdminFeedback from './pages/AdminFeedback'
 import ProtectedRoute from './components/ProtectedRoute'
 import UserRoute from './components/UserRoute'
+import MeetErrorBoundary from './components/MeetErrorBoundary'
 
 function App() {
   return (
@@ -32,9 +33,9 @@ function App() {
       <Route path="/articles" element={<MainLayout><ArticlesPage /></MainLayout>} />
       <Route path="/articles/:slug" element={<MainLayout><ArticleDetailPage /></MainLayout>} />
 
-      {/* Meet Routes */}
-      <Route path="/meet" element={<MainLayout><MeetPage /></MainLayout>} />
-      <Route path="/meet/:id" element={<MainLayout><MeetPage /></MainLayout>} />
+      {/* Meet Routes — wrapped in ErrorBoundary so hook errors show friendly UI */}
+      <Route path="/meet" element={<MainLayout><MeetErrorBoundary><MeetPage /></MeetErrorBoundary></MainLayout>} />
+      <Route path="/meet/:id" element={<MainLayout><MeetErrorBoundary><MeetPage /></MeetErrorBoundary></MainLayout>} />
 
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />
