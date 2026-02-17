@@ -366,6 +366,14 @@ io.on('connection', (socket) => {
       callback({ error: 'Room not found' });
       return;
     }
+
+    // Allow re-joining if already in the room (reconnect scenario)
+    if (room.has(socket.id)) {
+      console.log(`[rejoin] room=${roomId} by ${socket.id} (already in room)`);
+      callback({ ok: true });
+      return;
+    }
+
     if (room.size >= 2) {
       callback({ error: 'Room is full (max 2)' });
       return;

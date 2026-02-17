@@ -4,7 +4,16 @@ import { SIGNAL_URL, RESOLUTIONS } from './constants'
 
 /**
  * Manages WebRTC peer connection, socket.io signaling, and media streams.
+ *
+ * Resilience features:
+ * - ICE restart on connectionState 'disconnected' or 'failed'
+ * - Socket.io auto-reconnect with room re-join
+ * - Video stream re-attachment on visibility change (tab switch / minimize)
  */
+
+const ICE_RESTART_DELAY_MS = 1500
+const ICE_RESTART_MAX_ATTEMPTS = 3
+
 export default function useMeetConnection({ urlRoomId, videoResolution, onMusicSync }) {
   const [phase, setPhase] = useState(urlRoomId ? 'joining' : 'lobby')
   const [roomId, setRoomId] = useState(urlRoomId || '')
@@ -31,6 +40,12 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const remoteDescSetRef = useRef(false)
   const musicStreamDestRef = useRef(null)
   const iceServersRef = useRef(null)
+  const iceRestartAttemptsRef = useRef(0)
+  const iceRestartTimerRef = useRef(null)
+  const roomIdRef = useRef('') // track roomId for socket reconnect
+
+  // Keep roomIdRef in sync
+  useEffect(() => { roomIdRef.current = roomId }, [roomId])
 
   // Fetch ICE servers (TURN credentials) from backend
   const fetchIceServers = useCallback(async () => {
@@ -107,6 +122,43 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
   }, [phase])
 
+  // ─── Visibility change handler (fix video disappearing on minimize/tab switch) ───
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && phase === 'connected') {
+        // Re-attach local video
+        if (localVideoRef.current && localStreamRef.current) {
+          const current = localVideoRef.current.srcObject
+          if (!current || current.getVideoTracks().length === 0 || current.getVideoTracks().every(t => t.readyState === 'ended')) {
+            localVideoRef.current.srcObject = isScreenSharing ? screenStreamRef.current : localStreamRef.current
+          }
+        }
+        // Re-attach remote video if stream exists but element lost it
+        if (remoteVideoRef.current && pcRef.current) {
+          const receivers = pcRef.current.getReceivers()
+          const videoReceiver = receivers.find(r => r.track?.kind === 'video')
+          if (videoReceiver?.track && videoReceiver.track.readyState === 'live') {
+            const currentSrc = remoteVideoRef.current.srcObject
+            if (!currentSrc || currentSrc.getVideoTracks().length === 0) {
+              const stream = new MediaStream([videoReceiver.track])
+              remoteVideoRef.current.srcObject = stream
+            }
+          }
+        }
+        // Re-attach remote audio
+        if (remoteAudioRef.current && remoteAudioStreamRef.current.getTracks().length > 0) {
+          if (!remoteAudioRef.current.srcObject) {
+            remoteAudioRef.current.srcObject = remoteAudioStreamRef.current
+          }
+          remoteAudioRef.current.play().catch(() => {})
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [phase, isScreenSharing])
+
   // Create persistent <audio> element on mount
   useEffect(() => {
     const audio = document.createElement('audio')
@@ -119,7 +171,10 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => cleanup()
+    return () => {
+      if (iceRestartTimerRef.current) clearTimeout(iceRestartTimerRef.current)
+      cleanup()
+    }
   }, [])
 
   // Auto-join if URL has room id
@@ -141,16 +196,42 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   }
 
   function cleanup() {
+    if (iceRestartTimerRef.current) { clearTimeout(iceRestartTimerRef.current); iceRestartTimerRef.current = null }
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()) }
     if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()) }
     if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
+    iceRestartAttemptsRef.current = 0
   }
 
   async function loadSocketIO() {
-    // Dynamic import of socket.io-client npm package
     const { io } = await import('socket.io-client')
     return io
+  }
+
+  // ─── ICE Restart logic ─────────────────────────────────────────────────────
+  function attemptIceRestart() {
+    const pc = pcRef.current
+    const socket = socketRef.current
+    const peerId = peerIdRef.current
+    if (!pc || !socket || !peerId) return
+
+    if (iceRestartAttemptsRef.current >= ICE_RESTART_MAX_ATTEMPTS) {
+      console.warn('[ICE] Max restart attempts reached, giving up')
+      return
+    }
+
+    iceRestartAttemptsRef.current++
+    console.log(`[ICE] Attempting ICE restart (attempt ${iceRestartAttemptsRef.current}/${ICE_RESTART_MAX_ATTEMPTS})`)
+
+    pc.createOffer({ iceRestart: true })
+      .then(offer => pc.setLocalDescription(offer))
+      .then(() => {
+        socket.emit('signal', { to: peerId, data: pc.localDescription })
+      })
+      .catch(err => {
+        console.error('[ICE] Restart failed:', err)
+      })
   }
 
   async function initConnection(mode, targetRoomId) {
@@ -163,14 +244,21 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
 
     try {
-      // Fetch TURN credentials before connecting
       await fetchIceServers()
 
       const io = await loadSocketIO()
-      const socket = io(SIGNAL_URL, { path: '/socket.io/', transports: ['websocket', 'polling'] })
+      const socket = io(SIGNAL_URL, {
+        path: '/socket.io/',
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+      })
       socketRef.current = socket
 
       socket.on('peer-joined', (peerId) => {
+        iceRestartAttemptsRef.current = 0 // reset on new peer
         setPeerConnected(true)
         createPeerConnection(socket, peerId, true)
       })
@@ -178,26 +266,31 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       socket.on('signal', async ({ from, data }) => {
         if (!pcRef.current) createPeerConnection(socket, from, false)
         const pc = pcRef.current
-        if (data.type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(data))
-          remoteDescSetRef.current = true
-          for (const c of pendingCandidatesRef.current) await pc.addIceCandidate(new RTCIceCandidate(c))
-          pendingCandidatesRef.current = []
-          const answer = await pc.createAnswer()
-          await pc.setLocalDescription(answer)
-          socket.emit('signal', { to: from, data: answer })
-        } else if (data.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(data))
-          remoteDescSetRef.current = true
-          for (const c of pendingCandidatesRef.current) await pc.addIceCandidate(new RTCIceCandidate(c))
-          pendingCandidatesRef.current = []
-        } else if (data.candidate) {
-          if (remoteDescSetRef.current) await pc.addIceCandidate(new RTCIceCandidate(data))
-          else pendingCandidatesRef.current.push(data)
+        try {
+          if (data.type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data))
+            remoteDescSetRef.current = true
+            for (const c of pendingCandidatesRef.current) await pc.addIceCandidate(new RTCIceCandidate(c))
+            pendingCandidatesRef.current = []
+            const answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            socket.emit('signal', { to: from, data: answer })
+          } else if (data.type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data))
+            remoteDescSetRef.current = true
+            for (const c of pendingCandidatesRef.current) await pc.addIceCandidate(new RTCIceCandidate(c))
+            pendingCandidatesRef.current = []
+          } else if (data.candidate) {
+            if (remoteDescSetRef.current) await pc.addIceCandidate(new RTCIceCandidate(data))
+            else pendingCandidatesRef.current.push(data)
+          }
+        } catch (err) {
+          console.error('[signal] Error handling signal:', err)
         }
       })
 
       socket.on('peer-left', () => {
+        console.log('[peer-left] Peer disconnected, waiting for rejoin...')
         setPeerConnected(false)
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
         remoteAudioStreamRef.current = new MediaStream()
@@ -205,11 +298,41 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
         remoteDescSetRef.current = false
         pendingCandidatesRef.current = []
+        iceRestartAttemptsRef.current = 0
+        // NOTE: We do NOT leave the room. We stay connected to the socket
+        // so the peer can rejoin and we get a new 'peer-joined' event.
       })
 
       socket.on('music-sync', (msg) => onMusicSync?.(msg))
 
-      socket.on('connect_error', () => { setError('Cannot connect to signal server'); setPhase('lobby') })
+      socket.on('connect_error', (err) => {
+        console.error('[socket] connect_error:', err.message)
+        // Don't immediately bail to lobby — socket.io will auto-reconnect
+      })
+
+      // Handle socket.io reconnect — re-join the room
+      socket.on('reconnect', () => {
+        console.log('[socket] Reconnected, re-joining room...')
+        const rid = roomIdRef.current
+        if (rid) {
+          socket.emit('join-room', rid, (res) => {
+            if (res.error) {
+              console.error('[socket] Failed to re-join room:', res.error)
+              setError('会议连接已断开，请重新加入')
+              setPhase('lobby')
+            } else {
+              console.log('[socket] Re-joined room successfully')
+            }
+          })
+        }
+      })
+
+      // If socket fully fails after all retries
+      socket.on('reconnect_failed', () => {
+        console.error('[socket] All reconnection attempts failed')
+        setError('无法连接到信号服务器，请检查网络后重试')
+        setPhase('lobby')
+      })
 
       const [stream] = await Promise.all([
         navigator.mediaDevices.getUserMedia({ video: getVideoConstraints(), audio: true }),
@@ -239,6 +362,12 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   }
 
   function createPeerConnection(socket, peerId, isInitiator) {
+    // Clean up previous connection if any
+    if (pcRef.current) {
+      pcRef.current.close()
+      pcRef.current = null
+    }
+
     const iceServers = iceServersRef.current || [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
@@ -275,8 +404,34 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') setPeerConnected(true)
-      else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) setPeerConnected(false)
+      const state = pc.connectionState
+      console.log(`[WebRTC] connectionState: ${state}`)
+
+      if (state === 'connected') {
+        setPeerConnected(true)
+        iceRestartAttemptsRef.current = 0
+        if (iceRestartTimerRef.current) { clearTimeout(iceRestartTimerRef.current); iceRestartTimerRef.current = null }
+      } else if (state === 'disconnected') {
+        // Temporary disruption — attempt ICE restart after a short delay
+        // (connectionState can briefly go to 'disconnected' during network changes)
+        console.log('[WebRTC] Disconnected, scheduling ICE restart...')
+        if (iceRestartTimerRef.current) clearTimeout(iceRestartTimerRef.current)
+        iceRestartTimerRef.current = setTimeout(() => {
+          if (pcRef.current?.connectionState === 'disconnected') {
+            attemptIceRestart()
+          }
+        }, ICE_RESTART_DELAY_MS)
+      } else if (state === 'failed') {
+        // ICE has completely failed — try restart immediately
+        console.log('[WebRTC] Failed, attempting ICE restart...')
+        attemptIceRestart()
+      } else if (state === 'closed') {
+        setPeerConnected(false)
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] iceConnectionState: ${pc.iceConnectionState}`)
     }
 
     if (isInitiator) {
