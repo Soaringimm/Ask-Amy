@@ -44,9 +44,13 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const iceRestartAttemptsRef = useRef(0)
   const iceRestartTimerRef = useRef(null)
   const roomIdRef = useRef('') // track roomId for socket reconnect
+  const audioEnabledRef = useRef(true) // mirror audioEnabled for use in event callbacks
+  const phaseRef = useRef('lobby') // mirror phase for use in event callbacks
 
-  // Keep roomIdRef in sync
+  // Keep refs in sync with state (for use in callbacks/event listeners)
   useEffect(() => { roomIdRef.current = roomId }, [roomId])
+  useEffect(() => { audioEnabledRef.current = audioEnabled }, [audioEnabled])
+  useEffect(() => { phaseRef.current = phase }, [phase])
 
   // Fetch ICE servers (TURN credentials) from backend
   const fetchIceServers = useCallback(async () => {
@@ -159,6 +163,48 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [phase, isScreenSharing])
+
+  // ─── Bluetooth / audio device change handler ────────────────────────────────
+  // Fires when any audio/video device connects or disconnects (e.g. Bluetooth headset).
+  // If the current microphone track has ended, we re-acquire audio and hot-swap
+  // the track in the RTCPeerConnection without dropping the call.
+  useEffect(() => {
+    async function handleDeviceChange() {
+      if (phaseRef.current !== 'connected') return
+      const stream = localStreamRef.current
+      if (!stream) return
+
+      const audioTrack = stream.getAudioTracks()[0]
+      // Only act if the current track has ended (device disconnected)
+      if (audioTrack && audioTrack.readyState === 'live') return
+
+      console.log('[devicechange] Audio track ended, re-acquiring microphone...')
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const newAudioTrack = newStream.getAudioTracks()[0]
+
+        // Preserve the user's mute state
+        newAudioTrack.enabled = audioEnabledRef.current
+
+        // Swap out the old audio track in the local stream
+        stream.getAudioTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+        stream.addTrack(newAudioTrack)
+
+        // Replace the track in the RTCPeerConnection (no renegotiation needed)
+        if (pcRef.current) {
+          const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio')
+          if (sender) await sender.replaceTrack(newAudioTrack)
+        }
+
+        console.log('[devicechange] Audio track replaced successfully')
+      } catch (err) {
+        console.error('[devicechange] Failed to re-acquire audio:', err)
+      }
+    }
+
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, []) // stable: uses refs, no state deps needed
 
   // Create persistent <audio> element on mount
   useEffect(() => {
