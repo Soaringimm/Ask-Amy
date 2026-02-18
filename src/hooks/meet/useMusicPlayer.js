@@ -481,6 +481,9 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
         }
       }
       setMusicPlaying(false)
+      if (socketRef.current) {
+        socketRef.current.emit('music-sync', { type: 'pause', time: musicOffsetRef.current })
+      }
     }
   }
 
