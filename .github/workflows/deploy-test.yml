@@ -31,7 +31,7 @@ jobs:
           cd /home/jacky/apps/Ask-Amy
           git fetch origin
           git checkout dev
-          git pull origin dev
+          git reset --hard origin/dev
           docker compose -f docker-compose.test.yml build
           docker compose -f docker-compose.test.yml up -d
           docker ps | grep ask-amy-test
