@@ -253,7 +253,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
       const arrayBuf = await file.arrayBuffer()
       const audioBuffer = await ctx.decodeAudioData(arrayBuf.slice(0))
       newTracks.push({ name: file.name, duration: audioBuffer.duration, buffer: audioBuffer })
-      await saveAudioFile(file.name, file, audioBuffer.duration)
+      await saveAudioFile(file.name, file, audioBuffer.duration, user?.id)
     }
 
     const updated = [...playlistRef.current, ...newTracks]
@@ -292,7 +292,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
     const tracks = []
     const missing = []
     for (const song of pl.songs) {
-      const stored = await getAudioFile(song.name)
+      const stored = await getAudioFile(song.name, user?.id)
       if (stored && stored.blob) {
         const arrayBuf = await stored.blob.arrayBuffer()
         const audioBuffer = await ctx.decodeAudioData(arrayBuf)
