@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-// ─── IndexedDB: local audio blob storage ────────────────────────────────────
+// ─── IndexedDB: local audio blob cache ──────────────────────────────────────
 
 const DB_NAME = 'meet_audio'
 const STORE = 'files'
@@ -20,17 +20,17 @@ function openDB() {
   })
 }
 
-export async function saveAudioFile(name, blob, duration) {
+async function idbPut(record) {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).put({ name, blob, duration, savedAt: Date.now() })
+    tx.objectStore(STORE).put(record)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
 }
 
-export async function getAudioFile(name) {
+async function idbGet(name) {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly')
@@ -40,7 +40,7 @@ export async function getAudioFile(name) {
   })
 }
 
-export async function deleteAudioFile(name) {
+async function idbDelete(name) {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
@@ -48,6 +48,62 @@ export async function deleteAudioFile(name) {
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
+}
+
+// ─── Supabase Storage helpers ────────────────────────────────────────────────
+
+const BUCKET = 'aa_audio_files'
+
+function storagePath(userId, name) {
+  return `${userId}/${encodeURIComponent(name)}`
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Save audio file: cache in IndexedDB immediately, upload to Supabase Storage
+ * in background (non-blocking so playback starts right away).
+ */
+export async function saveAudioFile(name, blob, duration, userId) {
+  // 1. Cache locally first (instant)
+  await idbPut({ name, blob, duration, savedAt: Date.now() })
+
+  // 2. Upload to cloud in background
+  if (userId) {
+    const path = storagePath(userId, name)
+    supabase.storage
+      .from(BUCKET)
+      .upload(path, blob, { upsert: true, contentType: blob.type || 'audio/mpeg' })
+      .then(({ error }) => {
+        if (error) console.warn('[audio storage] upload failed:', error.message)
+      })
+  }
+}
+
+/**
+ * Get audio file: IndexedDB first (fast cache), then Supabase Storage.
+ * Downloads from cloud and caches locally on hit.
+ */
+export async function getAudioFile(name, userId) {
+  // 1. Try local cache
+  const cached = await idbGet(name)
+  if (cached) return cached
+
+  // 2. Try Supabase Storage
+  if (userId) {
+    const path = storagePath(userId, name)
+    const { data, error } = await supabase.storage.from(BUCKET).download(path)
+    if (!error && data) {
+      await idbPut({ name, blob: data, duration: 0, savedAt: Date.now() })
+      return { name, blob: data, duration: 0 }
+    }
+  }
+
+  return null
+}
+
+export async function deleteAudioFile(name) {
+  await idbDelete(name)
 }
 
 // ─── Supabase: playlist metadata CRUD ───────────────────────────────────────

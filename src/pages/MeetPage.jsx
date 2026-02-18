@@ -41,7 +41,7 @@ export default function MeetPage() {
     videoEnabled, audioEnabled, speakerEnabled, audioBlocked, isScreenSharing,
     user, userRole,
     socketRef, pcRef, localVideoRef, remoteVideoRef, remoteAudioStreamRef,
-    localStreamRef, musicStreamDestRef,
+    localStreamRef, musicStreamDestRef, screenShareVideoRef,
     initConnection, renegotiate, cleanup,
     toggleVideo, toggleAudio, toggleSpeaker, toggleScreenShare,
     rebindLocalVideo, rebindRemoteVideo,
@@ -62,7 +62,7 @@ export default function MeetPage() {
 
   const recording = useMeetRecording({ user, roomId, localStreamRef, remoteAudioStreamRef })
 
-  const pip = usePiP({ ytMode: youtube.ytMode })
+  const pip = usePiP({ ytMode: youtube.ytMode, isScreenSharing })
 
   // Re-bind video srcObject after PiP restore (browsers may drop playback on tiny elements)
   useEffect(() => {
@@ -113,7 +113,12 @@ export default function MeetPage() {
 
   async function confirmHangUp() {
     setShowHangUpDialog(false)
-    if (recording.isRecording) await recording.stopRecording()
+    if (recording.isRecording) {
+      await Promise.race([
+        recording.stopRecording(),
+        new Promise(resolve => setTimeout(resolve, 4000)),
+      ])
+    }
     hangUp()
   }
 
@@ -315,32 +320,32 @@ export default function MeetPage() {
         <div ref={pip.mainVideoAreaRef} className="flex-1 flex items-center justify-center p-6 relative">
           {/* Remote Video */}
           <div
-            className={ytMode ? `rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container group ${pip.remotePipMin ? 'cursor-pointer' : ''}` : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'}
-            style={ytMode ? pip.getPipStyle('remote') : undefined}
-            onPointerDown={ytMode ? (e) => pip.onPipPointerDown(e, 'remote') : undefined}
+            className={(ytMode || isScreenSharing) ? `rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container group ${pip.remotePipMin ? 'cursor-pointer' : ''}` : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'}
+            style={(ytMode || isScreenSharing) ? pip.getPipStyle('remote') : undefined}
+            onPointerDown={(ytMode || isScreenSharing) ? (e) => pip.onPipPointerDown(e, 'remote') : undefined}
           >
-            {ytMode && pip.remotePipMin && (
+            {(ytMode || isScreenSharing) && pip.remotePipMin && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-800 rounded-2xl px-3"><span className="text-xs text-white font-semibold truncate">对方</span></div>
             )}
             <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-            {!peerConnected && !ytMode && (
+            {!peerConnected && !ytMode && !isScreenSharing && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-sm">
                 <div className="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4 animate-pulse"><FaVideo className="text-3xl text-slate-400" /></div>
                 <p className="text-slate-300 text-xl font-semibold mb-2">等待对方加入...</p>
                 <p className="text-slate-500 text-sm">分享会议 ID 邀请参与者</p>
               </div>
             )}
-            {ytMode && !pip.remotePipMin && <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent"><span className="text-xs text-white font-semibold">对方</span></div>}
-            {ytMode && !pip.remotePipMin && (
+            {(ytMode || isScreenSharing) && !pip.remotePipMin && <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent"><span className="text-xs text-white font-semibold">对方</span></div>}
+            {(ytMode || isScreenSharing) && !pip.remotePipMin && (
               <button className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={(e) => { e.stopPropagation(); pip.setRemotePipMin(true) }} onPointerDown={(e) => e.stopPropagation()} title="最小化">−</button>
             )}
-            {ytMode && !pip.remotePipMin && (
+            {(ytMode || isScreenSharing) && !pip.remotePipMin && (
               <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity" onPointerDown={(e) => pip.onResizePointerDown(e, 'remote')}>
                 <svg viewBox="0 0 16 16" className="w-full h-full text-white/70"><path d="M14 14L8 14L14 8Z" fill="currentColor" /></svg>
               </div>
             )}
-            {!ytMode && <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />}
+            {!ytMode && !isScreenSharing && <div className="absolute inset-0 bg-gradient-to-t from-slate-900/20 via-transparent to-transparent pointer-events-none" />}
           </div>
 
           {/* YouTube player */}
@@ -348,17 +353,31 @@ export default function MeetPage() {
             <div id="yt-player-embed"></div>
           </div>
 
+          {/* Local music video overlay — shown when playing a video track (not during screen share) */}
+          <div className={music.currentTrack?.hasVideo && !isScreenSharing && !ytMode ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl' : 'hidden'}>
+            <video ref={music.localMusicVideoRef} className="w-full h-full object-contain" playsInline />
+          </div>
+
+          {/* Screen Share overlay — shown in main window when screen sharing (above YouTube player) */}
+          <div className={isScreenSharing ? 'absolute inset-6 z-20 bg-black rounded-3xl overflow-hidden shadow-2xl border-2 border-primary-500/50' : 'hidden'}>
+            <video ref={screenShareVideoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
+            <div className="absolute bottom-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-sm">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              <span className="text-xs text-white font-semibold">屏幕共享中</span>
+            </div>
+          </div>
+
           {/* Local Video PiP */}
-          <div className={`rounded-2xl overflow-hidden shadow-2xl group ${pip.localPipMin ? 'cursor-pointer' : ''} ${isScreenSharing ? 'border-2 border-primary-500/80 shadow-primary-500/30' : 'border-2 border-slate-600/50'}`}
+          <div className={`rounded-2xl overflow-hidden shadow-2xl group ${pip.localPipMin ? 'cursor-pointer' : ''} border-2 border-slate-600/50`}
             style={pip.getPipStyle('local')} onPointerDown={(e) => pip.onPipPointerDown(e, 'local')}>
             {pip.localPipMin && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-800 rounded-2xl px-3"><span className="text-xs text-white font-semibold truncate">{isScreenSharing ? '屏幕' : '你'}</span></div>
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-800 rounded-2xl px-3"><span className="text-xs text-white font-semibold truncate">你</span></div>
             )}
-            <video ref={localVideoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${isScreenSharing ? '' : 'mirror'}`} />
+            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover mirror" />
             {!pip.localPipMin && (
               <div className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-white font-semibold">{isScreenSharing ? '你的屏幕' : '你'}</span>
+                  <span className="text-xs text-white font-semibold">你</span>
                   {isScreenSharing && <span className="flex items-center gap-1 text-xs text-green-400 font-semibold"><div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />共享中</span>}
                 </div>
               </div>
@@ -401,11 +420,11 @@ export default function MeetPage() {
                       <div className="space-y-1">
                         {music.playlist.map((track, i) => (
                           <div key={`${track.name}-${i}`} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${i === music.currentTrackIndex ? 'bg-primary-600/20 text-primary-300' : 'text-gray-300 hover:bg-gray-700/50'}`}
-                            onClick={() => music.isMusicHost && track.buffer && music.playTrackAtIndex(i)}>
+                            onClick={() => music.isMusicHost && (track.buffer || track.hasVideo) && music.playTrackAtIndex(i)}>
                             <span className="text-xs w-5 text-right flex-shrink-0">
                               {i === music.currentTrackIndex && music.musicPlaying ? <span className="text-primary-400">&#9654;</span> : <span className="text-gray-500">{i + 1}.</span>}
                             </span>
-                            <span className={`text-xs truncate flex-1 ${!track.buffer ? 'italic text-gray-500' : ''}`}>{track.name}{!track.buffer && ' (missing)'}</span>
+                            <span className={`text-xs truncate flex-1 ${!track.buffer && !track.hasVideo ? 'italic text-gray-500' : ''}`}>{track.name}{!track.buffer && !track.hasVideo && ' (missing)'}</span>
                             <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(track.duration)}</span>
                             {music.isMusicHost && (
                               <button onClick={(e) => { e.stopPropagation(); music.removeTrack(i) }} className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"><FaTimes size={10} /></button>

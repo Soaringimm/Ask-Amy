@@ -1,0 +1,30 @@
+name: ask-amy-test
+
+services:
+  ask-amy:
+    build:
+      context: .
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_CAL_USERNAME: ${VITE_CAL_USERNAME}
+        VITE_CAL_API_KEY: ${VITE_CAL_API_KEY}
+    container_name: ask-amy-test
+    env_file:
+      - .env.test
+    environment:
+      - SEARCH_SERVICE_TOKEN=${SEARCH_SERVICE_TOKEN}
+    ports:
+      - "8508:80"
+    networks:
+      - immicore-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  immicore-network:
+    external: true
