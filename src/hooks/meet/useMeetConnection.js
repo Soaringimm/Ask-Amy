@@ -628,10 +628,15 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       const screenTrack = screenStream.getVideoTracks()[0]
       screenTrack.onended = () => stopScreenShare()
 
+      // Always show screen share locally regardless of peer connection state
+      if (screenShareVideoRef.current) {
+        screenShareVideoRef.current.srcObject = screenStream
+        screenShareVideoRef.current.play().catch(() => {})
+      }
+      // Send to peer only if connected
       if (pcRef.current && localStreamRef.current) {
         const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video')
         if (sender) await sender.replaceTrack(screenTrack)
-        if (screenShareVideoRef.current) screenShareVideoRef.current.srcObject = screenStream
       }
       setIsScreenSharing(true)
     } catch (err) {
