@@ -348,8 +348,13 @@ export default function MeetPage() {
             <div id="yt-player-embed"></div>
           </div>
 
-          {/* Screen Share overlay — shown in main window when screen sharing (and not ytMode) */}
-          <div className={!ytMode && isScreenSharing ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl border-2 border-primary-500/50' : 'hidden'}>
+          {/* Local music video overlay — shown when playing a video track (not during screen share) */}
+          <div className={music.currentTrack?.hasVideo && !isScreenSharing ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl' : 'hidden'}>
+            <video ref={music.localMusicVideoRef} className="w-full h-full object-contain" playsInline />
+          </div>
+
+          {/* Screen Share overlay — shown in main window when screen sharing (above YouTube player) */}
+          <div className={isScreenSharing ? 'absolute inset-6 z-20 bg-black rounded-3xl overflow-hidden shadow-2xl border-2 border-primary-500/50' : 'hidden'}>
             <video ref={screenShareVideoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
             <div className="absolute bottom-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-sm">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
@@ -410,11 +415,11 @@ export default function MeetPage() {
                       <div className="space-y-1">
                         {music.playlist.map((track, i) => (
                           <div key={`${track.name}-${i}`} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${i === music.currentTrackIndex ? 'bg-primary-600/20 text-primary-300' : 'text-gray-300 hover:bg-gray-700/50'}`}
-                            onClick={() => music.isMusicHost && track.buffer && music.playTrackAtIndex(i)}>
+                            onClick={() => music.isMusicHost && (track.buffer || track.hasVideo) && music.playTrackAtIndex(i)}>
                             <span className="text-xs w-5 text-right flex-shrink-0">
                               {i === music.currentTrackIndex && music.musicPlaying ? <span className="text-primary-400">&#9654;</span> : <span className="text-gray-500">{i + 1}.</span>}
                             </span>
-                            <span className={`text-xs truncate flex-1 ${!track.buffer ? 'italic text-gray-500' : ''}`}>{track.name}{!track.buffer && ' (missing)'}</span>
+                            <span className={`text-xs truncate flex-1 ${!track.buffer && !track.hasVideo ? 'italic text-gray-500' : ''}`}>{track.name}{!track.buffer && !track.hasVideo && ' (missing)'}</span>
                             <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(track.duration)}</span>
                             {music.isMusicHost && (
                               <button onClick={(e) => { e.stopPropagation(); music.removeTrack(i) }} className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"><FaTimes size={10} /></button>
