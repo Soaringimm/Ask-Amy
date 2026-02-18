@@ -14,6 +14,7 @@ import { SIGNAL_URL, RESOLUTIONS } from './constants'
 
 const ICE_RESTART_DELAY_MS = 1500
 const ICE_RESTART_MAX_ATTEMPTS = 3
+const FREEZE_CHECK_INTERVAL_MS = 12000
 
 export default function useMeetConnection({ urlRoomId, videoResolution, onMusicSync }) {
   const navigate = useNavigate()
@@ -51,6 +52,8 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const phaseRef = useRef('lobby') // mirror phase for use in event callbacks
   const onMusicSyncRef = useRef(onMusicSync) // mirror onMusicSync to avoid stale closure in socket listener
   const initInFlightRef = useRef(false) // guard against concurrent initConnection calls
+  const lastFramesReceivedRef = useRef(0) // for freeze detection
+  const freezeCheckTimerRef = useRef(null)
 
   // Keep refs in sync with state/props (for use in callbacks/event listeners)
   useEffect(() => { roomIdRef.current = roomId }, [roomId])
@@ -170,6 +173,63 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [phase, isScreenSharing])
 
+  // ─── Periodic video freeze detection ──────────────────────────────────────
+  // Checks framesReceived via getStats every 12s. If frames stop advancing
+  // while the inbound video track is still 'live', re-bind srcObject or ICE restart.
+  useEffect(() => {
+    if (phase !== 'connected') {
+      if (freezeCheckTimerRef.current) { clearInterval(freezeCheckTimerRef.current); freezeCheckTimerRef.current = null }
+      return
+    }
+
+    freezeCheckTimerRef.current = setInterval(async () => {
+      const pc = pcRef.current
+      if (!pc || pc.connectionState !== 'connected') return
+
+      try {
+        const stats = await pc.getStats()
+        let currentFrames = null
+        stats.forEach(report => {
+          if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            currentFrames = report.framesReceived
+          }
+        })
+
+        if (currentFrames === null) return // no video stats yet
+
+        if (currentFrames === lastFramesReceivedRef.current) {
+          // Frames haven't advanced — video is likely frozen
+          console.warn(`[freeze-detect] Video frozen (framesReceived stuck at ${currentFrames}), recovering...`)
+
+          // Try re-binding srcObject first
+          const videoEl = remoteVideoRef.current
+          if (videoEl) {
+            const receivers = pc.getReceivers()
+            const videoReceiver = receivers.find(r => r.track?.kind === 'video' && r.track.readyState === 'live')
+            if (videoReceiver) {
+              const freshStream = new MediaStream([videoReceiver.track])
+              videoEl.srcObject = freshStream
+              remoteVideoStreamRef.current = freshStream
+              videoEl.play().catch(() => {})
+            } else {
+              // No live video track — try ICE restart
+              console.warn('[freeze-detect] No live video receiver, attempting ICE restart')
+              attemptIceRestart()
+            }
+          }
+        }
+
+        lastFramesReceivedRef.current = currentFrames
+      } catch (err) {
+        console.error('[freeze-detect] getStats error:', err)
+      }
+    }, FREEZE_CHECK_INTERVAL_MS)
+
+    return () => {
+      if (freezeCheckTimerRef.current) { clearInterval(freezeCheckTimerRef.current); freezeCheckTimerRef.current = null }
+    }
+  }, [phase])
+
   // ─── Bluetooth / audio device change handler ────────────────────────────────
   // Fires when any audio/video device connects or disconnects (e.g. Bluetooth headset).
   // If the current microphone track has ended, we re-acquire audio and hot-swap
@@ -255,6 +315,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
   function cleanup() {
     if (iceRestartTimerRef.current) { clearTimeout(iceRestartTimerRef.current); iceRestartTimerRef.current = null }
+    if (freezeCheckTimerRef.current) { clearInterval(freezeCheckTimerRef.current); freezeCheckTimerRef.current = null }
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop())
@@ -598,14 +659,38 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     if (vTrack.enabled) rebindLocalVideo()
   }
 
-  function toggleAudio() {
+  async function toggleAudio() {
     const stream = localStreamRef.current
     if (!stream) return
     const aTrack = stream.getAudioTracks()[0]
+
+    // If audio track has ended, re-acquire microphone (same logic as handleDeviceChange)
     if (!aTrack || aTrack.readyState === 'ended') {
-      console.warn('[toggleAudio] No live audio track available')
+      console.log('[toggleAudio] Audio track ended, re-acquiring microphone...')
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const newAudioTrack = newStream.getAudioTracks()[0]
+        // New track starts enabled (unmuted)
+        newAudioTrack.enabled = true
+
+        // Swap in local stream
+        stream.getAudioTracks().forEach(t => { t.stop(); stream.removeTrack(t) })
+        stream.addTrack(newAudioTrack)
+
+        // Replace in peer connection sender
+        if (pcRef.current) {
+          const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio' || (s.track === null && s !== pcRef.current.getSenders().find(x => x.track?.kind === 'video')))
+          if (sender) await sender.replaceTrack(newAudioTrack)
+        }
+
+        setAudioEnabled(true)
+        console.log('[toggleAudio] Audio track re-acquired successfully')
+      } catch (err) {
+        console.error('[toggleAudio] Failed to re-acquire audio:', err)
+      }
       return
     }
+
     aTrack.enabled = !aTrack.enabled
     setAudioEnabled(aTrack.enabled)
   }
