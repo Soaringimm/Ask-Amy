@@ -677,7 +677,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
   function hangUp() {
     cleanup()
-    navigate('/meet') // (#10) Use React Router navigate instead of window.location.href
+    setPhase('lobby')
   }
 
   return {
