@@ -39,6 +39,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const remoteAudioStreamRef = useRef(new MediaStream())
   const localStreamRef = useRef(null)
   const screenStreamRef = useRef(null)
+  const screenShareVideoRef = useRef(null)
   const pendingCandidatesRef = useRef([])
   const remoteDescSetRef = useRef(false)
   const musicStreamDestRef = useRef(null)
@@ -563,7 +564,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   function rebindLocalVideo() {
     const videoEl = localVideoRef.current
     if (!videoEl) return
-    const stream = isScreenSharing ? screenStreamRef.current : localStreamRef.current
+    const stream = localStreamRef.current
     if (stream) {
       if (videoEl.srcObject !== stream) videoEl.srcObject = stream
       // Ensure playback resumes after browser may have paused it
@@ -630,7 +631,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       if (pcRef.current && localStreamRef.current) {
         const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video')
         if (sender) await sender.replaceTrack(screenTrack)
-        if (localVideoRef.current) localVideoRef.current.srcObject = screenStream
+        if (screenShareVideoRef.current) screenShareVideoRef.current.srcObject = screenStream
       }
       setIsScreenSharing(true)
     } catch (err) {
@@ -646,11 +647,11 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         screenStreamRef.current.getTracks().forEach(track => track.stop())
         screenStreamRef.current = null
       }
+      if (screenShareVideoRef.current) screenShareVideoRef.current.srcObject = null
       if (pcRef.current && localStreamRef.current) {
         const videoTrack = localStreamRef.current.getVideoTracks()[0]
         const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video')
         if (sender && videoTrack) await sender.replaceTrack(videoTrack)
-        if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current
       }
       setIsScreenSharing(false)
     } catch (err) {
@@ -681,7 +682,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     user, userRole,
     // Refs
     socketRef, pcRef, localVideoRef, remoteVideoRef, remoteAudioRef,
-    remoteAudioStreamRef, localStreamRef, musicStreamDestRef,
+    remoteAudioStreamRef, localStreamRef, musicStreamDestRef, screenShareVideoRef,
     // Actions
     initConnection, renegotiate, cleanup,
     toggleVideo, toggleAudio, toggleSpeaker, toggleScreenShare,

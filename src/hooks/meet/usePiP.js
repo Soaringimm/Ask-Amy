@@ -8,7 +8,7 @@ import {
 /**
  * Manages PiP drag, resize, and minimize state for local and remote video.
  */
-export default function usePiP({ ytMode }) {
+export default function usePiP({ ytMode, isScreenSharing }) {
   const [localPipPos, setLocalPipPos] = useState(null)
   const [remotePipPos, setRemotePipPos] = useState(null)
   const [localPipSize, setLocalPipSize] = useState({ w: PIP_W, h: PIP_H })
@@ -21,12 +21,13 @@ export default function usePiP({ ytMode }) {
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const resizingPipRef = useRef(null)
 
-  // Reset PiP positions when ytMode changes
+  // Reset PiP positions when ytMode or isScreenSharing changes
   useEffect(() => {
     const el = mainVideoAreaRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
-    if (ytMode) {
+    if (ytMode || isScreenSharing) {
+      // YouTube or screen share takes main area — both videos become PIPs
       setRemotePipPos({ x: PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
       setLocalPipPos({ x: r.width - PIP_W - PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
     } else {
@@ -37,7 +38,7 @@ export default function usePiP({ ytMode }) {
     }
     setLocalPipSize({ w: PIP_W, h: PIP_H })
     setLocalPipMin(false)
-  }, [ytMode])
+  }, [ytMode, isScreenSharing])
 
   // Initialize local PiP position on mount
   useEffect(() => {
