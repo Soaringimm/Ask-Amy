@@ -1,0 +1,55 @@
+name: Deploy Test (dev branch)
+
+on:
+  push:
+    branches:
+      - dev
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Deployment reason'
+        required: false
+        default: 'Manual test deployment'
+
+jobs:
+  deploy-test:
+    name: Deploy Ask-Amy Test
+    runs-on: self-hosted
+
+    steps:
+      - name: 📦 Get commit info
+        id: commit
+        run: |
+          cd /home/jacky/apps/Ask-Amy
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "message=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
+
+      - name: 🚀 Deploy to test server
+        run: |
+          cd /home/jacky/apps/Ask-Amy
+          bash deploy-test.sh
+
+      - name: ✅ Deployment Summary
+        run: |
+          echo "### 🧪 Test Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** dev" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ steps.commit.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Message:** ${{ steps.commit.outputs.message }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** http://localhost:8508" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🧪 Health Check
+        run: |
+          echo "Waiting 30 seconds for deployment to stabilize..."
+          sleep 30
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8508)
+          if [ $HTTP_CODE -eq 200 ]; then
+            echo "✅ Test application is accessible (HTTP $HTTP_CODE)"
+          else
+            echo "❌ Test application returned HTTP $HTTP_CODE"
+            exit 1
+          fi
