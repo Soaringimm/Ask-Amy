@@ -113,7 +113,12 @@ export default function MeetPage() {
 
   async function confirmHangUp() {
     setShowHangUpDialog(false)
-    if (recording.isRecording) await recording.stopRecording()
+    if (recording.isRecording) {
+      await Promise.race([
+        recording.stopRecording(),
+        new Promise(resolve => setTimeout(resolve, 4000)),
+      ])
+    }
     hangUp()
   }
 
@@ -349,7 +354,7 @@ export default function MeetPage() {
           </div>
 
           {/* Local music video overlay — shown when playing a video track (not during screen share) */}
-          <div className={music.currentTrack?.hasVideo && !isScreenSharing ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl' : 'hidden'}>
+          <div className={music.currentTrack?.hasVideo && !isScreenSharing && !ytMode ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl' : 'hidden'}>
             <video ref={music.localMusicVideoRef} className="w-full h-full object-contain" playsInline />
           </div>
 
