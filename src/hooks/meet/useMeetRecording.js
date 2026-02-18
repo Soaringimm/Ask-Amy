@@ -124,35 +124,35 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
 
     setProcessingState('processing')
 
-    try {
-      const record = await saveAndProcessRecording({
-        userId: user.id, roomId, topic: '', durationSeconds, audioBlob: blob,
-        onUpdate: (updated) => {
-          setRecordings(prev => prev.map(r => r.id === updated.id ? updated : r))
-          setEditingRecording(prev => prev?.id === updated.id ? updated : prev)
-          if (updated.summary?.status === 'done') {
-            setMeetingSummary(prev => {
-              if (prev?._recordId === updated.id) return { ...updated.summary, transcript: updated.transcript, _recordId: updated.id }
-              return prev
-            })
-            setProcessingState('done')
-            setTimeout(() => setProcessingState(''), ERROR_DISMISS_TIMEOUT)
-          } else if (updated.summary?.status === 'error') {
-            setProcessingState('error')
-            setSummaryError(updated.summary.error || 'Processing failed')
-            setTimeout(() => setProcessingState(''), PROCESSING_ERROR_DISMISS_TIMEOUT)
-          }
-        },
-      })
+    // Fire and forget — do not block the caller (e.g. hangUp) on upload/AI processing
+    saveAndProcessRecording({
+      userId: user.id, roomId, topic: '', durationSeconds, audioBlob: blob,
+      onUpdate: (updated) => {
+        setRecordings(prev => prev.map(r => r.id === updated.id ? updated : r))
+        setEditingRecording(prev => prev?.id === updated.id ? updated : prev)
+        if (updated.summary?.status === 'done') {
+          setMeetingSummary(prev => {
+            if (prev?._recordId === updated.id) return { ...updated.summary, transcript: updated.transcript, _recordId: updated.id }
+            return prev
+          })
+          setProcessingState('done')
+          setTimeout(() => setProcessingState(''), ERROR_DISMISS_TIMEOUT)
+        } else if (updated.summary?.status === 'error') {
+          setProcessingState('error')
+          setSummaryError(updated.summary.error || 'Processing failed')
+          setTimeout(() => setProcessingState(''), PROCESSING_ERROR_DISMISS_TIMEOUT)
+        }
+      },
+    }).then(record => {
       setRecordings(prev => [record, ...prev])
       setEditingRecording(record)
       pollRecordingStatus(record.id)
-    } catch (err) {
+    }).catch(err => {
       console.error('Failed to save recording:', err)
       setProcessingState('error')
       setSummaryError(err.message || 'Failed to save recording')
       setTimeout(() => setProcessingState(''), PROCESSING_ERROR_DISMISS_TIMEOUT)
-    }
+    })
   }
 
   function pollRecordingStatus(recordId) {
