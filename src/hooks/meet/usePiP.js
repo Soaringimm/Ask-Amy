@@ -20,6 +20,8 @@ export default function usePiP({ ytMode, isScreenSharing }) {
   const draggingPipRef = useRef(null)
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const resizingPipRef = useRef(null)
+  const dragHandlersRef = useRef({ onMove: null, onUp: null })
+  const resizeHandlersRef = useRef({ onMove: null, onUp: null })
 
   // Reset PiP positions when ytMode or isScreenSharing changes
   useEffect(() => {
@@ -46,6 +48,18 @@ export default function usePiP({ ytMode, isScreenSharing }) {
     if (!el) return
     const r = el.getBoundingClientRect()
     setLocalPipPos({ x: r.width - PIP_W - PIP_MARGIN, y: r.height - PIP_H - PIP_MARGIN })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      const dragHandlers = dragHandlersRef.current
+      if (dragHandlers.onMove) window.removeEventListener('pointermove', dragHandlers.onMove)
+      if (dragHandlers.onUp) window.removeEventListener('pointerup', dragHandlers.onUp)
+
+      const resizeHandlers = resizeHandlersRef.current
+      if (resizeHandlers.onMove) window.removeEventListener('pointermove', resizeHandlers.onMove)
+      if (resizeHandlers.onUp) window.removeEventListener('pointerup', resizeHandlers.onUp)
+    }
   }, [])
 
   function onPipPointerDown(e, pipId) {
@@ -78,11 +92,18 @@ export default function usePiP({ ytMode, isScreenSharing }) {
       draggingPipRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      dragHandlersRef.current = { onMove: null, onUp: null }
       if (!didMove && isMin) {
         const setMin = pipId === 'local' ? setLocalPipMin : setRemotePipMin
         setMin(false)
       }
     }
+
+    const prevDragHandlers = dragHandlersRef.current
+    if (prevDragHandlers.onMove) window.removeEventListener('pointermove', prevDragHandlers.onMove)
+    if (prevDragHandlers.onUp) window.removeEventListener('pointerup', prevDragHandlers.onUp)
+    dragHandlersRef.current = { onMove, onUp }
+
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }
@@ -113,7 +134,14 @@ export default function usePiP({ ytMode, isScreenSharing }) {
       resizingPipRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      resizeHandlersRef.current = { onMove: null, onUp: null }
     }
+
+    const prevResizeHandlers = resizeHandlersRef.current
+    if (prevResizeHandlers.onMove) window.removeEventListener('pointermove', prevResizeHandlers.onMove)
+    if (prevResizeHandlers.onUp) window.removeEventListener('pointerup', prevResizeHandlers.onUp)
+    resizeHandlersRef.current = { onMove, onUp }
+
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }

@@ -45,7 +45,7 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
       clearInterval(recordingTimerRef.current)
       clearTimeout(pollTimerRef.current)
       if (recorderRef.current) {
-        try { recorderRef.current.stop() } catch (_) {}
+        try { recorderRef.current.stop() } catch { /* no-op */ }
         recorderRef.current = null
       }
       if (recordingMixerCtxRef.current) {
@@ -68,23 +68,47 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
     setSummaryError('')
     setMeetingSummary(null)
     setProcessingState('')
+    clearInterval(recordingTimerRef.current)
 
-    const { ctx, stream } = createRecordingMixer(localStreamRef.current, remoteAudioStreamRef.current)
-    recordingMixerCtxRef.current = ctx
+    const hasLocalAudio = (localStreamRef.current?.getAudioTracks()?.length || 0) > 0
+    const hasRemoteAudio = (remoteAudioStreamRef.current?.getAudioTracks()?.length || 0) > 0
+    if (!hasLocalAudio && !hasRemoteAudio) {
+      setProcessingState('error')
+      setSummaryError('没有可用音频，无法开始录音。')
+      setTimeout(() => setProcessingState(''), ERROR_DISMISS_TIMEOUT)
+      return
+    }
 
-    const recorder = createMeetRecorder(stream)
-    recorderRef.current = recorder
-    recorder.start()
+    try {
+      const { ctx, stream } = createRecordingMixer(localStreamRef.current, remoteAudioStreamRef.current)
+      recordingMixerCtxRef.current = ctx
 
-    recordingStartRef.current = Date.now()
-    recordingPausedTimeRef.current = 0
-    setRecordingTime(0)
-    setIsRecording(true)
-    setIsPaused(false)
+      const recorder = createMeetRecorder(stream)
+      recorderRef.current = recorder
+      recorder.start()
 
-    recordingTimerRef.current = setInterval(() => {
-      setRecordingTime(Math.floor((Date.now() - recordingStartRef.current - recordingPausedTimeRef.current) / 1000))
-    }, RECORDING_TIMER_INTERVAL)
+      recordingStartRef.current = Date.now()
+      recordingPausedTimeRef.current = 0
+      setRecordingTime(0)
+      setIsRecording(true)
+      setIsPaused(false)
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(Math.floor((Date.now() - recordingStartRef.current - recordingPausedTimeRef.current) / 1000))
+      }, RECORDING_TIMER_INTERVAL)
+    } catch (err) {
+      console.error('Failed to start recording:', err)
+      setProcessingState('error')
+      setSummaryError(err.message || '录音启动失败')
+      setTimeout(() => setProcessingState(''), ERROR_DISMISS_TIMEOUT)
+      if (recordingMixerCtxRef.current) {
+        recordingMixerCtxRef.current.close()
+        recordingMixerCtxRef.current = null
+      }
+      recorderRef.current = null
+      setIsRecording(false)
+      setIsPaused(false)
+    }
   }
 
   function toggleRecordingPause() {
@@ -245,6 +269,11 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
     setIsEditing(true)
   }
 
+  function cancelEditing() {
+    setIsEditing(false)
+    setEditForm(null)
+  }
+
   async function saveRecordingEdit() {
     if (!editingRecording || !editForm) return
     setSavingEdit(true)
@@ -257,8 +286,8 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
       }
       const updated = await updateRecording(editingRecording.id, { summary: newSummary, transcript: editForm.transcript })
       setEditingRecording(updated)
-      setMeetingSummary({ ...newSummary, transcript: editForm.transcript })
-      setIsEditing(false); setEditForm(null)
+      setMeetingSummary({ ...newSummary, status: 'done', transcript: editForm.transcript })
+      cancelEditing()
       fetchRecordings()
     } catch (err) {
       console.error('Failed to save recording edit:', err)
@@ -284,6 +313,6 @@ export default function useMeetRecording({ user, roomId, localStreamRef, remoteA
     recordings, showRecordings, setShowRecordings,
     startRecording, toggleRecordingPause, stopRecording,
     copySummaryText, dismissSummary, fetchRecordings, openRecording,
-    startEditing, saveRecordingEdit, handleDeleteRecording,
+    startEditing, cancelEditing, saveRecordingEdit, handleDeleteRecording,
   }
 }

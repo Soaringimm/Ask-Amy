@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { loadYouTubeAPI, parseYouTubeURL, createYTPlayer, YTState } from '../../lib/youtubePlayer'
 import { savePlaylist, getPlaylists, deletePlaylist as deletePlaylistApi } from '../../lib/playlistStorage'
 import { YT_IGNORE_STATE_DELAY, YT_TIME_UPDATE_INTERVAL, YT_PLAYBACK_RATES, MUSIC_RESTART_THRESHOLD } from './constants'
@@ -19,6 +19,7 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
   const [isYtHost, setIsYtHost] = useState(false)
   const [ytPlaybackRate, setYtPlaybackRate] = useState(1)
   const [ytManagedItems, setYtManagedItems] = useState([])
+  const [ytManagedPlayingIdx, setYtManagedPlayingIdx] = useState(-1)
   const [savedYtPlaylists, setSavedYtPlaylists] = useState([])
   const [ytPlaylistName, setYtPlaylistName] = useState('')
   const [savingYtPlaylist, setSavingYtPlaylist] = useState(false)
@@ -28,25 +29,35 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
   const ytTimerRef = useRef(null)
   const ytIgnoreStateRef = useRef(false)
   const ytManagedPlayingIdxRef = useRef(-1)
-  const ytManagedItemsRef = useRef([])
   const ytTitlesFetchingRef = useRef(new Set())
 
-  useEffect(() => { ytManagedItemsRef.current = ytManagedItems }, [ytManagedItems])
-
-  // Fetch saved playlists
-  useEffect(() => {
-    if (user) fetchSavedYtPlaylists(user.id)
-    else setSavedYtPlaylists([])
-  }, [user])
-
-  async function fetchSavedYtPlaylists(userId) {
+  const fetchSavedYtPlaylists = useCallback(async (userId) => {
     try {
       const data = await getPlaylists(userId, 'youtube')
       setSavedYtPlaylists(data)
     } catch (err) {
       console.error('Failed to fetch YouTube playlists:', err)
     }
-  }
+  }, [])
+
+  // Fetch saved playlists
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!user) {
+        if (!cancelled) setSavedYtPlaylists([])
+        return
+      }
+      try {
+        const data = await getPlaylists(user.id, 'youtube')
+        if (!cancelled) setSavedYtPlaylists(data)
+      } catch (err) {
+        console.error('Failed to fetch YouTube playlists:', err)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [user])
 
   // ResizeObserver for YT container
   useEffect(() => {
@@ -269,6 +280,8 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
     stopYtTimeUpdater()
     setYtMode(false); setYtPlaying(false); setYtTime(0); setYtDuration(0)
     setYtVideoTitle(''); setYtPlaylistItems([]); setYtCurrentIndex(-1)
+    setYtManagedPlayingIdx(-1)
+    ytManagedPlayingIdxRef.current = -1
     setYtUrl(''); setIsYtHost(false); setYtPlaybackRate(1)
     ytTitlesFetchingRef.current.clear()
     if (socketRef.current) socketRef.current.emit('music-sync', { type: 'yt-stop' })
@@ -343,6 +356,8 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
         stopYtTimeUpdater()
         setYtMode(false); setYtPlaying(false); setYtTime(0); setYtDuration(0)
         setYtVideoTitle(''); setYtPlaylistItems([]); setYtCurrentIndex(-1)
+        setYtManagedPlayingIdx(-1)
+        ytManagedPlayingIdxRef.current = -1
         setIsYtHost(false); setYtPlaybackRate(1)
         break
     }
@@ -357,13 +372,23 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
     return null
   }
 
-  function removeYtItem(index) { setYtManagedItems(prev => prev.filter((_, i) => i !== index)) }
+  function removeYtItem(index) {
+    setYtManagedItems(prev => prev.filter((_, i) => i !== index))
+    if (ytManagedPlayingIdxRef.current === index) {
+      ytManagedPlayingIdxRef.current = -1
+      setYtManagedPlayingIdx(-1)
+    } else if (ytManagedPlayingIdxRef.current > index) {
+      ytManagedPlayingIdxRef.current -= 1
+      setYtManagedPlayingIdx(prev => (prev > index ? prev - 1 : prev))
+    }
+  }
 
   function playYtItem(index) {
     const item = ytManagedItems[index]
     if (!item) return
     pauseMusic()
     ytManagedPlayingIdxRef.current = index
+    setYtManagedPlayingIdx(index)
     setTab('youtube')
     loadYouTube(item.url)
   }
@@ -383,7 +408,12 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
   function handleLoadYtPlaylist(pl) {
     const items = pl.songs.map(s => ({ url: s.url, title: s.title || s.videoId || 'YouTube Video', videoId: s.videoId, listId: s.listId }))
     setYtManagedItems(items)
-    if (items.length > 0) { setTab('youtube'); loadYouTube(items[0].url) }
+    if (items.length > 0) {
+      ytManagedPlayingIdxRef.current = 0
+      setYtManagedPlayingIdx(0)
+      setTab('youtube')
+      loadYouTube(items[0].url)
+    }
   }
 
   async function handleDeleteYtPlaylist(id) {
@@ -394,7 +424,7 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
   return {
     ytMode, ytUrl, setYtUrl, ytVideoTitle, ytPlaying, ytTime, ytDuration,
     ytPlaylistItems, ytCurrentIndex, ytLoading, isYtHost, ytPlaybackRate,
-    ytManagedItems, ytManagedPlayingIdxRef, savedYtPlaylists,
+    ytManagedItems, ytManagedPlayingIdx, savedYtPlaylists,
     ytPlaylistName, setYtPlaylistName, savingYtPlaylist,
     ytContainerRef, ytPlayerRef,
     loadYouTube, toggleYtPlayback, ytPlayAt, seekYt, ytNextTrack, ytPrevTrack,

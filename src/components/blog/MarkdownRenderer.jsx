@@ -2,14 +2,55 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSlug from 'rehype-slug'
 import rehypeAutolinkHeadings from 'rehype-autolink-headings'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx'
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json'
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown'
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css'
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql'
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python'
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import { FaCopy, FaCheck, FaLink } from 'react-icons/fa'
 import { useState } from 'react'
+
+SyntaxHighlighter.registerLanguage('javascript', javascript)
+SyntaxHighlighter.registerLanguage('js', javascript)
+SyntaxHighlighter.registerLanguage('jsx', jsx)
+SyntaxHighlighter.registerLanguage('typescript', typescript)
+SyntaxHighlighter.registerLanguage('ts', typescript)
+SyntaxHighlighter.registerLanguage('tsx', tsx)
+SyntaxHighlighter.registerLanguage('bash', bash)
+SyntaxHighlighter.registerLanguage('shell', bash)
+SyntaxHighlighter.registerLanguage('sh', bash)
+SyntaxHighlighter.registerLanguage('json', json)
+SyntaxHighlighter.registerLanguage('markdown', markdown)
+SyntaxHighlighter.registerLanguage('md', markdown)
+SyntaxHighlighter.registerLanguage('css', css)
+SyntaxHighlighter.registerLanguage('sql', sql)
+SyntaxHighlighter.registerLanguage('python', python)
+SyntaxHighlighter.registerLanguage('py', python)
+SyntaxHighlighter.registerLanguage('yaml', yaml)
+yaml && SyntaxHighlighter.registerLanguage('yml', yaml)
+
+const LANGUAGE_ALIAS_MAP = {
+  js: 'javascript',
+  ts: 'typescript',
+  py: 'python',
+  md: 'markdown',
+  yml: 'yaml',
+  sh: 'bash',
+  shell: 'bash',
+}
 
 // Refined code block with elegant styling
 function CodeBlock({ language, children }) {
   const [copied, setCopied] = useState(false)
+  const normalizedLanguage = LANGUAGE_ALIAS_MAP[language] || language || 'text'
 
   const handleCopy = async () => {
     try {
@@ -63,7 +104,7 @@ function CodeBlock({ language, children }) {
         </div>
         {/* Code content */}
         <SyntaxHighlighter
-          language={language || 'text'}
+          language={normalizedLanguage}
           style={oneDark}
           customStyle={{
             margin: 0,
@@ -194,7 +235,7 @@ const components = {
       {children}
     </ol>
   ),
-  li: ({ children, ordered, ...props }) => (
+  li: ({ children, ...props }) => (
     <li
       className="flex items-start gap-3 text-gray-600 text-[17px] leading-relaxed"
       {...props}

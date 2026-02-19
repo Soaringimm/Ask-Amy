@@ -58,6 +58,10 @@ function storagePath(userId, name) {
   return `${userId}/${encodeURIComponent(name)}`
 }
 
+function cacheKey(name, userId) {
+  return `${userId || 'guest'}::${name}`
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -65,8 +69,9 @@ function storagePath(userId, name) {
  * in background (non-blocking so playback starts right away).
  */
 export async function saveAudioFile(name, blob, duration, userId) {
+  const key = cacheKey(name, userId)
   // 1. Cache locally first (instant)
-  await idbPut({ name, blob, duration, savedAt: Date.now() })
+  await idbPut({ name: key, originalName: name, blob, duration, savedAt: Date.now() })
 
   // 2. Upload to cloud in background
   if (userId) {
@@ -85,16 +90,25 @@ export async function saveAudioFile(name, blob, duration, userId) {
  * Downloads from cloud and caches locally on hit.
  */
 export async function getAudioFile(name, userId) {
+  const key = cacheKey(name, userId)
   // 1. Try local cache
-  const cached = await idbGet(name)
-  if (cached) return cached
+  const cached = await idbGet(key)
+  if (cached) return { ...cached, name }
+
+  // Backward compatibility: migrate legacy unscoped cache key
+  const legacy = await idbGet(name)
+  if (legacy) {
+    await idbPut({ ...legacy, name: key, originalName: name })
+    await idbDelete(name)
+    return { ...legacy, name }
+  }
 
   // 2. Try Supabase Storage
   if (userId) {
     const path = storagePath(userId, name)
     const { data, error } = await supabase.storage.from(BUCKET).download(path)
     if (!error && data) {
-      await idbPut({ name, blob: data, duration: 0, savedAt: Date.now() })
+      await idbPut({ name: key, originalName: name, blob: data, duration: 0, savedAt: Date.now() })
       return { name, blob: data, duration: 0 }
     }
   }
@@ -102,7 +116,10 @@ export async function getAudioFile(name, userId) {
   return null
 }
 
-export async function deleteAudioFile(name) {
+export async function deleteAudioFile(name, userId) {
+  if (userId) {
+    await idbDelete(cacheKey(name, userId))
+  }
   await idbDelete(name)
 }
 

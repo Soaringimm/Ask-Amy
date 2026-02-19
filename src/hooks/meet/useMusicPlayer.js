@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   saveAudioFile, getAudioFile,
   savePlaylist, getPlaylists, deletePlaylist as deletePlaylistApi,
@@ -44,20 +44,53 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
   const currentTrack = playlist[currentTrackIndex] || null
   const musicName = currentTrack?.name || ''
 
-  // Fetch saved playlists
-  useEffect(() => {
-    if (user) fetchSavedPlaylists(user.id)
-    else setSavedPlaylists([])
-  }, [user])
+  const revokeTrackObjectUrls = useCallback((tracks) => {
+    tracks.forEach((t) => {
+      if (t?.objectUrl) URL.revokeObjectURL(t.objectUrl)
+    })
+  }, [])
 
-  async function fetchSavedPlaylists(userId) {
+  const fetchSavedPlaylists = useCallback(async (userId) => {
     try {
       const data = await getPlaylists(userId, 'local')
       setSavedPlaylists(data)
     } catch (err) {
       console.error('Failed to fetch saved playlists:', err)
     }
-  }
+  }, [])
+
+  const stopCurrentSource = useCallback(() => {
+    if (musicSourceRef.current) {
+      musicSourceRef.current.onended = null
+      try { musicSourceRef.current.stop() } catch (e) { console.debug('source already stopped:', e.message) }
+      musicSourceRef.current = null
+    }
+    const videoEl = localMusicVideoRef.current
+    if (videoEl) {
+      if (!videoEl.paused) videoEl.pause()
+      videoEl.ontimeupdate = null
+      videoEl.onended = null
+    }
+  }, [])
+
+  // Fetch saved playlists
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!user) {
+        if (!cancelled) setSavedPlaylists([])
+        return
+      }
+      try {
+        const data = await getPlaylists(user.id, 'local')
+        if (!cancelled) setSavedPlaylists(data)
+      } catch (err) {
+        console.error('Failed to fetch saved playlists:', err)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [user])
 
   // Music time updater — only for audio-only tracks; video tracks use ontimeupdate
   useEffect(() => {
@@ -98,23 +131,9 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
       cancelAnimationFrame(animFrameRef.current)
       stopCurrentSource()
       if (audioCtxRef.current) audioCtxRef.current.close()
-      playlistRef.current.forEach(t => { if (t.objectUrl) URL.revokeObjectURL(t.objectUrl) })
+      revokeTrackObjectUrls(playlistRef.current)
     }
-  }, [])
-
-  function stopCurrentSource() {
-    if (musicSourceRef.current) {
-      musicSourceRef.current.onended = null
-      try { musicSourceRef.current.stop() } catch (e) { console.debug('source already stopped:', e.message) }
-      musicSourceRef.current = null
-    }
-    const videoEl = localMusicVideoRef.current
-    if (videoEl && !videoEl.paused) {
-      videoEl.pause()
-      videoEl.ontimeupdate = null
-      videoEl.onended = null
-    }
-  }
+  }, [revokeTrackObjectUrls, stopCurrentSource])
 
   function ensureAudioContext() {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
@@ -383,6 +402,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
         tracks.push({ name: song.name, duration: song.duration, buffer: null, hasVideo: false, objectUrl: null })
       }
     }
+    revokeTrackObjectUrls(playlistRef.current)
     setPlaylist(tracks)
 
     if (missing.length > 0) {
@@ -437,6 +457,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
   function handlePeerMusicSync(msg) {
     switch (msg.type) {
       case 'load-playlist':
+        revokeTrackObjectUrls(playlistRef.current)
         setPlaylist(msg.tracks.map(t => ({ name: t.name, duration: t.duration, buffer: null, hasVideo: false, objectUrl: null })))
         setCurrentTrackIndex(msg.index)
         setMusicDuration(msg.tracks[msg.index]?.duration || 0)
@@ -459,6 +480,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
         setMusicPlaying(false); setMusicTime(0)
         break
       case 'load':
+        revokeTrackObjectUrls(playlistRef.current)
         setPlaylist([{ name: msg.name, duration: msg.duration, buffer: null, hasVideo: false, objectUrl: null }])
         setCurrentTrackIndex(0); setMusicDuration(msg.duration); setIsMusicHost(false)
         break

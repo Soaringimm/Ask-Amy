@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { SIGNAL_URL, RESOLUTIONS } from './constants'
 
@@ -17,7 +16,6 @@ const ICE_RESTART_MAX_ATTEMPTS = 3
 const FREEZE_CHECK_INTERVAL_MS = 12000
 
 export default function useMeetConnection({ urlRoomId, videoResolution, onMusicSync }) {
-  const navigate = useNavigate()
   const [phase, setPhase] = useState(urlRoomId ? 'joining' : 'lobby')
   const [roomId, setRoomId] = useState(urlRoomId || '')
   const [error, setError] = useState('')
@@ -48,6 +46,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const iceRestartAttemptsRef = useRef(0)
   const iceRestartTimerRef = useRef(null)
   const roomIdRef = useRef('') // track roomId for socket reconnect
+  const stableIdRef = useRef('') // track stableId for socket reconnect
   const audioEnabledRef = useRef(true) // mirror audioEnabled for use in event callbacks
   const phaseRef = useRef('lobby') // mirror phase for use in event callbacks
   const onMusicSyncRef = useRef(onMusicSync) // mirror onMusicSync to avoid stale closure in socket listener
@@ -300,7 +299,9 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     if (urlRoomId && phase === 'joining') {
       initConnection('join', urlRoomId)
     }
-  }, [urlRoomId])
+    // initConnection is intentionally excluded: re-creating it should not re-trigger auto join.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlRoomId, phase])
 
   function canCreateMeeting() {
     if (!user) return { allowed: false, reason: '请先登录才能创建会议' }
@@ -395,11 +396,16 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
           localStorage.setItem('aa_meet_client_id', stableId)
         }
       }
+      stableIdRef.current = stableId
+
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token || null
 
       const io = await loadSocketIO()
       const socket = io(SIGNAL_URL, {
         path: '/socket.io/',
         transports: ['websocket', 'polling'],
+        ...(token ? { auth: { token } } : {}),
         reconnection: true,
         reconnectionAttempts: 10,
         reconnectionDelay: 1000,
@@ -474,7 +480,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
         const rid = roomIdRef.current
         if (rid) {
-          socket.emit('join-room', rid, (res) => {
+          socket.emit('join-room', rid, stableIdRef.current || socket.id, (res = {}) => {
             if (res.error) {
               console.error('[socket] Failed to re-join room:', res.error)
               setError('会议连接已断开，请重新加入')
@@ -509,13 +515,36 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       if (localVideoRef.current) localVideoRef.current.srcObject = stream
 
       if (mode === 'create') {
-        socket.emit('create-room', stableId, (res) => {
-          if (res.roomId) { setRoomId(res.roomId); setPhase('connected'); window.history.replaceState(null, '', `/meet/${res.roomId}`) }
+        socket.emit('create-room', stableId, (res = {}) => {
+          if (res.error) {
+            setError(res.error)
+            setPhase('lobby')
+            return
+          }
+          if (!res.roomId) {
+            setError('创建会议失败，请重试')
+            setPhase('lobby')
+            return
+          }
+          setRoomId(res.roomId)
+          setPhase('connected')
+          window.history.replaceState(null, '', `/meet/${res.roomId}`)
         })
       } else {
-        socket.emit('join-room', targetRoomId, stableId, (res) => {
-          if (res.error) { setError(res.error === 'Room not found' ? 'Meeting ID not found' : res.error); setPhase('lobby'); return }
-          setRoomId(targetRoomId); setPhase('connected'); window.history.replaceState(null, '', `/meet/${targetRoomId}`)
+        socket.emit('join-room', targetRoomId, stableId, (res = {}) => {
+          if (res.error) {
+            setError(res.error === 'Room not found' ? 'Meeting ID not found' : res.error)
+            setPhase('lobby')
+            return
+          }
+          if (!res.ok) {
+            setError('加入会议失败，请重试')
+            setPhase('lobby')
+            return
+          }
+          setRoomId(targetRoomId)
+          setPhase('connected')
+          window.history.replaceState(null, '', `/meet/${targetRoomId}`)
         })
       }
     } catch (err) {
@@ -622,7 +651,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   }
 
   // Re-bind local video srcObject (call after PiP restore, screen share stop, etc.)
-  function rebindLocalVideo() {
+  const rebindLocalVideo = useCallback(() => {
     const videoEl = localVideoRef.current
     if (!videoEl) return
     const stream = localStreamRef.current
@@ -631,10 +660,10 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       // Ensure playback resumes after browser may have paused it
       if (videoEl.paused) videoEl.play().catch(() => {})
     }
-  }
+  }, [])
 
   // Re-bind remote video srcObject
-  function rebindRemoteVideo() {
+  const rebindRemoteVideo = useCallback(() => {
     const videoEl = remoteVideoRef.current
     if (!videoEl) return
     const stream = remoteVideoStreamRef.current
@@ -642,7 +671,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       if (videoEl.srcObject !== stream) videoEl.srcObject = stream
       if (videoEl.paused) videoEl.play().catch(() => {})
     }
-  }
+  }, [])
 
   // Media toggles
   function toggleVideo() {
