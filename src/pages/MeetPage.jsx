@@ -52,6 +52,7 @@ export default function MeetPage() {
     socketRef, user,
     pauseMusic: () => music.pauseMusic(),
     setActiveTab,
+    speakerEnabled,
   })
 
   const music = useMusicPlayer({
