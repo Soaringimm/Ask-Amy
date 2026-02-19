@@ -10,7 +10,8 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return null
-          if (id.includes('react-dom') || id.includes('/react/')) return 'react-vendor'
+          // Keep React runtime stack together to avoid cross-chunk init cycles.
+          if (id.includes('react-dom') || id.includes('/react/') || id.includes('/scheduler/')) return 'react-vendor'
           if (id.includes('react-router')) return 'router-vendor'
           if (id.includes('@tanstack/react-query')) return 'query-vendor'
           if (id.includes('@supabase/')) return 'supabase-vendor'
