@@ -48,6 +48,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   const roomIdRef = useRef('') // track roomId for socket reconnect
   const stableIdRef = useRef('') // track stableId for socket reconnect
   const audioEnabledRef = useRef(true) // mirror audioEnabled for use in event callbacks
+  const speakerEnabledRef = useRef(true) // mirror speakerEnabled for use in event callbacks
   const phaseRef = useRef('lobby') // mirror phase for use in event callbacks
   const onMusicSyncRef = useRef(onMusicSync) // mirror onMusicSync to avoid stale closure in socket listener
   const initInFlightRef = useRef(false) // guard against concurrent initConnection calls
@@ -57,6 +58,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
   // Keep refs in sync with state/props (for use in callbacks/event listeners)
   useEffect(() => { roomIdRef.current = roomId }, [roomId])
   useEffect(() => { audioEnabledRef.current = audioEnabled }, [audioEnabled])
+  useEffect(() => { speakerEnabledRef.current = speakerEnabled }, [speakerEnabled])
   useEffect(() => { phaseRef.current = phase }, [phase])
   useEffect(() => { onMusicSyncRef.current = onMusicSync }, [onMusicSync])
 
@@ -117,11 +119,32 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
   }
 
+  function applySpeakerStateToRemoteAudio() {
+    if (!remoteAudioRef.current) return
+    const enabled = speakerEnabledRef.current !== false
+    remoteAudioRef.current.muted = !enabled
+    remoteAudioRef.current.volume = enabled ? 1 : 0
+  }
+
+  function getMicSender() {
+    const pc = pcRef.current
+    if (!pc) return null
+
+    const localAudioTrackIds = new Set((localStreamRef.current?.getAudioTracks() || []).map(t => t.id))
+    const musicAudioTrackIds = new Set((musicStreamDestRef.current?.stream?.getAudioTracks() || []).map(t => t.id))
+
+    // Prefer sender bound to localStream's audio track(s)
+    let sender = pc.getSenders().find(s => s.track?.kind === 'audio' && localAudioTrackIds.has(s.track.id))
+    if (sender) return sender
+
+    // Fallback: any non-music audio sender
+    sender = pc.getSenders().find(s => s.track?.kind === 'audio' && !musicAudioTrackIds.has(s.track.id))
+    return sender || null
+  }
+
   // Sync speaker state
   useEffect(() => {
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.muted = !speakerEnabled
-    }
+    applySpeakerStateToRemoteAudio()
   }, [speakerEnabled])
 
   // Attach local stream to video element once meeting view renders
@@ -131,6 +154,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
     if (phase === 'connected' && remoteAudioRef.current && remoteAudioStreamRef.current.getTracks().length > 0) {
       remoteAudioRef.current.srcObject = remoteAudioStreamRef.current
+      applySpeakerStateToRemoteAudio()
       remoteAudioRef.current.play().then(() => setAudioBlocked(false)).catch(() => setAudioBlocked(true))
     }
   }, [phase])
@@ -163,6 +187,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
           if (!remoteAudioRef.current.srcObject) {
             remoteAudioRef.current.srcObject = remoteAudioStreamRef.current
           }
+          applySpeakerStateToRemoteAudio()
           remoteAudioRef.current.play().catch(() => {})
         }
       }
@@ -239,6 +264,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
       // Always re-trigger remote audio so it falls back to the new default output device
       if (remoteAudioRef.current) {
+        applySpeakerStateToRemoteAudio()
         remoteAudioRef.current.play().catch(() => {})
       }
 
@@ -246,7 +272,11 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       const stream = localStreamRef.current
       if (!stream) return
       const audioTrack = stream.getAudioTracks()[0]
-      if (audioTrack && audioTrack.readyState === 'live') return
+      if (audioTrack && audioTrack.readyState === 'live') {
+        // Keep actual track state aligned with current UI state after device switching.
+        audioTrack.enabled = audioEnabledRef.current
+        return
+      }
 
       console.log('[devicechange] Audio track ended, re-acquiring microphone...')
       try {
@@ -261,9 +291,9 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         stream.addTrack(newAudioTrack)
 
         // Replace the track in the RTCPeerConnection (no renegotiation needed)
-        if (pcRef.current) {
-          const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio')
-          if (sender) await sender.replaceTrack(newAudioTrack)
+        const sender = getMicSender()
+        if (sender) {
+          await sender.replaceTrack(newAudioTrack)
         }
 
         console.log('[devicechange] Audio track replaced successfully')
@@ -281,6 +311,8 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     const audio = document.createElement('audio')
     audio.autoplay = true
     audio.playsInline = true
+    audio.muted = !speakerEnabledRef.current
+    audio.volume = speakerEnabledRef.current ? 1 : 0
     document.body.appendChild(audio)
     remoteAudioRef.current = audio
     return () => { audio.remove() }
@@ -592,6 +624,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         remoteAudioStreamRef.current.addTrack(e.track)
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = remoteAudioStreamRef.current
+          applySpeakerStateToRemoteAudio()
           remoteAudioRef.current.play().then(() => setAudioBlocked(false)).catch(() => setAudioBlocked(true))
         }
       }
@@ -707,11 +740,10 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         stream.addTrack(newAudioTrack)
 
         // Replace in peer connection sender
-        if (pcRef.current) {
-          const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio' || (s.track === null && s !== pcRef.current.getSenders().find(x => x.track?.kind === 'video')))
-          if (sender) await sender.replaceTrack(newAudioTrack)
-        }
+        const sender = getMicSender()
+        if (sender) await sender.replaceTrack(newAudioTrack)
 
+        audioEnabledRef.current = true
         setAudioEnabled(true)
         console.log('[toggleAudio] Audio track re-acquired successfully')
       } catch (err) {
@@ -721,15 +753,17 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     }
 
     aTrack.enabled = !aTrack.enabled
+    audioEnabledRef.current = aTrack.enabled
     setAudioEnabled(aTrack.enabled)
   }
 
   function toggleSpeaker() {
-    if (remoteAudioRef.current) {
-      const newState = !speakerEnabled
-      remoteAudioRef.current.muted = !newState
-      setSpeakerEnabled(newState)
-    }
+    setSpeakerEnabled(prev => {
+      const next = !prev
+      speakerEnabledRef.current = next
+      applySpeakerStateToRemoteAudio()
+      return next
+    })
   }
 
   async function startScreenShare() {
@@ -785,6 +819,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
 
   function unlockAudio() {
     if (remoteAudioRef.current) {
+      applySpeakerStateToRemoteAudio()
       remoteAudioRef.current.play().then(() => setAudioBlocked(false)).catch(() => {})
     }
   }

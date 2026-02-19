@@ -6,7 +6,7 @@ import { YT_IGNORE_STATE_DELAY, YT_TIME_UPDATE_INTERVAL, YT_PLAYBACK_RATES, MUSI
 /**
  * Manages YouTube player integration and sync.
  */
-export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiveTab: setTab }) {
+export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiveTab: setTab, speakerEnabled }) {
   const [ytMode, setYtMode] = useState(false)
   const [ytUrl, setYtUrl] = useState('')
   const [ytVideoTitle, setYtVideoTitle] = useState('')
@@ -30,6 +30,18 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
   const ytIgnoreStateRef = useRef(false)
   const ytManagedPlayingIdxRef = useRef(-1)
   const ytTitlesFetchingRef = useRef(new Set())
+
+  // Keep YouTube output in sync with global speaker toggle.
+  useEffect(() => {
+    const p = ytPlayerRef.current
+    if (!p) return
+    try {
+      if (speakerEnabled === false) p.mute()
+      else p.unMute()
+    } catch (err) {
+      console.debug('[YT speaker] mute sync skipped:', err.message)
+    }
+  }, [speakerEnabled])
 
   const fetchSavedYtPlaylists = useCallback(async (userId) => {
     try {
@@ -202,6 +214,12 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
         videoId: parsed.videoId, listId: parsed.listId, visible: true,
         onReady: () => {
           setYtLoading(false)
+          try {
+            if (speakerEnabled === false) player.mute()
+            else player.unMute()
+          } catch (err) {
+            console.debug('[YT onReady] speaker sync skipped:', err.message)
+          }
           const pl = player.getPlaylist?.()
           if (pl && pl.length > 0) {
             setYtPlaylistItems(pl.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
@@ -299,6 +317,12 @@ export default function useYouTubePlayer({ socketRef, user, pauseMusic, setActiv
         videoId: msg.videoId, listId: msg.listId, visible: true,
         onReady: () => {
           setYtLoading(false)
+          try {
+            if (speakerEnabled === false) player.mute()
+            else player.unMute()
+          } catch (err) {
+            console.debug('[YT peer onReady] speaker sync skipped:', err.message)
+          }
           const pl = player.getPlaylist?.()
           if (pl && pl.length > 0) {
             setYtPlaylistItems(pl.map((vid, i) => ({ videoId: vid, title: `Track ${i + 1}` })))
