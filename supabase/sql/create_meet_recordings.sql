@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS aa_meet_recordings (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS idx_aa_meet_recordings_user_created_at
+  ON aa_meet_recordings(user_id, created_at DESC);
+
 -- RLS: users can only access their own recordings
 ALTER TABLE aa_meet_recordings ENABLE ROW LEVEL SECURITY;
 

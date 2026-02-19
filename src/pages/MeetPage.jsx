@@ -42,7 +42,7 @@ export default function MeetPage() {
     user, userRole,
     socketRef, pcRef, localVideoRef, remoteVideoRef, remoteAudioStreamRef,
     localStreamRef, musicStreamDestRef, screenShareVideoRef,
-    initConnection, renegotiate, cleanup,
+    initConnection, renegotiate,
     toggleVideo, toggleAudio, toggleSpeaker, toggleScreenShare,
     rebindLocalVideo, rebindRemoteVideo,
     unlockAudio, hangUp,
@@ -59,29 +59,36 @@ export default function MeetPage() {
     ytMode: youtube.ytMode, stopYouTube: youtube.stopYouTube, setActiveTab,
     speakerEnabled,
   })
+  const { localMusicVideoRef, addMoreInputRef } = music
 
   const recording = useMeetRecording({ user, roomId, localStreamRef, remoteAudioStreamRef })
 
-  const pip = usePiP({ ytMode: youtube.ytMode, isScreenSharing })
+  const {
+    mainVideoAreaRef,
+    localPipMin, setLocalPipMin,
+    remotePipMin, setRemotePipMin,
+    onPipPointerDown, onResizePointerDown, getPipStyle,
+  } = usePiP({ ytMode: youtube.ytMode, isScreenSharing })
 
   // Re-bind video srcObject after PiP restore (browsers may drop playback on tiny elements)
   useEffect(() => {
-    if (!pip.localPipMin && phase === 'connected') rebindLocalVideo()
-  }, [pip.localPipMin, phase])
+    if (!localPipMin && phase === 'connected') rebindLocalVideo()
+  }, [localPipMin, phase, rebindLocalVideo])
 
   useEffect(() => {
-    if (!pip.remotePipMin && phase === 'connected') rebindRemoteVideo()
-  }, [pip.remotePipMin, phase])
+    if (!remotePipMin && phase === 'connected') rebindRemoteVideo()
+  }, [remotePipMin, phase, rebindRemoteVideo])
 
   // Wire up music sync handler
-  handleMusicSyncRef.current = (msg) => {
-    // YouTube-related messages
-    if (msg.type === 'youtube-load' || msg.type === 'yt-state' || msg.type === 'yt-stop') {
-      youtube.handlePeerYtSync(msg)
-    } else {
-      music.handlePeerMusicSync(msg)
+  useEffect(() => {
+    handleMusicSyncRef.current = (msg) => {
+      if (msg.type === 'youtube-load' || msg.type === 'yt-state' || msg.type === 'yt-stop') {
+        youtube.handlePeerYtSync(msg)
+      } else {
+        music.handlePeerMusicSync(msg)
+      }
     }
-  }
+  }, [youtube, music])
 
   // Tab switching logic
   function switchTab(tab) {
@@ -269,8 +276,8 @@ export default function MeetPage() {
 
   // ─── Meeting view ─────────────────────────────────────────────────────────
   const { ytMode, ytContainerRef, isYtHost, ytPlaying, ytTime, ytDuration, ytVideoTitle,
-    ytPlaylistItems, ytCurrentIndex, ytPlaybackRate, ytManagedItems, ytManagedPlayingIdxRef,
-    ytUrl, setYtUrl, ytLoading, savedYtPlaylists, ytPlaylistName, setYtPlaylistName, savingYtPlaylist,
+    ytPlaylistItems, ytCurrentIndex, ytPlaybackRate, ytManagedItems, ytManagedPlayingIdx,
+    ytUrl, setYtUrl, savedYtPlaylists, ytPlaylistName, setYtPlaylistName, savingYtPlaylist,
   } = youtube
 
   return (
@@ -317,14 +324,14 @@ export default function MeetPage() {
 
       {/* Video area + Playlist panel */}
       <div className="flex-1 flex min-h-0 relative z-0">
-        <div ref={pip.mainVideoAreaRef} className="flex-1 flex items-center justify-center p-6 relative">
+        <div ref={mainVideoAreaRef} className="flex-1 flex items-center justify-center p-6 relative">
           {/* Remote Video */}
           <div
-            className={(ytMode || isScreenSharing) ? `rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container group ${pip.remotePipMin ? 'cursor-pointer' : ''}` : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'}
-            style={(ytMode || isScreenSharing) ? pip.getPipStyle('remote') : undefined}
-            onPointerDown={(ytMode || isScreenSharing) ? (e) => pip.onPipPointerDown(e, 'remote') : undefined}
+            className={(ytMode || isScreenSharing) ? `rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-600/50 meet-video-container group ${remotePipMin ? 'cursor-pointer' : ''}` : 'flex-1 h-full relative rounded-3xl overflow-hidden meet-video-container shadow-2xl border border-slate-700/30'}
+            style={(ytMode || isScreenSharing) ? getPipStyle('remote') : undefined}
+            onPointerDown={(ytMode || isScreenSharing) ? (e) => onPipPointerDown(e, 'remote') : undefined}
           >
-            {(ytMode || isScreenSharing) && pip.remotePipMin && (
+            {(ytMode || isScreenSharing) && remotePipMin && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-800 rounded-2xl px-3"><span className="text-xs text-white font-semibold truncate">对方</span></div>
             )}
             <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
@@ -335,13 +342,13 @@ export default function MeetPage() {
                 <p className="text-slate-500 text-sm">分享会议 ID 邀请参与者</p>
               </div>
             )}
-            {(ytMode || isScreenSharing) && !pip.remotePipMin && <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent"><span className="text-xs text-white font-semibold">对方</span></div>}
-            {(ytMode || isScreenSharing) && !pip.remotePipMin && (
+            {(ytMode || isScreenSharing) && !remotePipMin && <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/80 to-transparent"><span className="text-xs text-white font-semibold">对方</span></div>}
+            {(ytMode || isScreenSharing) && !remotePipMin && (
               <button className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => { e.stopPropagation(); pip.setRemotePipMin(true) }} onPointerDown={(e) => e.stopPropagation()} title="最小化">−</button>
+                onClick={(e) => { e.stopPropagation(); setRemotePipMin(true) }} onPointerDown={(e) => e.stopPropagation()} title="最小化">−</button>
             )}
-            {(ytMode || isScreenSharing) && !pip.remotePipMin && (
-              <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity" onPointerDown={(e) => pip.onResizePointerDown(e, 'remote')}>
+            {(ytMode || isScreenSharing) && !remotePipMin && (
+              <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity" onPointerDown={(e) => onResizePointerDown(e, 'remote')}>
                 <svg viewBox="0 0 16 16" className="w-full h-full text-white/70"><path d="M14 14L8 14L14 8Z" fill="currentColor" /></svg>
               </div>
             )}
@@ -355,7 +362,7 @@ export default function MeetPage() {
 
           {/* Local music video overlay — shown when playing a video track (not during screen share) */}
           <div className={music.currentTrack?.hasVideo && !isScreenSharing && !ytMode ? 'absolute inset-6 z-10 bg-black rounded-3xl overflow-hidden shadow-2xl' : 'hidden'}>
-            <video ref={music.localMusicVideoRef} className="w-full h-full object-contain" playsInline />
+            <video ref={localMusicVideoRef} className="w-full h-full object-contain" playsInline />
           </div>
 
           {/* Screen Share overlay — shown in main window when screen sharing (above YouTube player) */}
@@ -368,13 +375,13 @@ export default function MeetPage() {
           </div>
 
           {/* Local Video PiP */}
-          <div className={`rounded-2xl overflow-hidden shadow-2xl group ${pip.localPipMin ? 'cursor-pointer' : ''} border-2 border-slate-600/50`}
-            style={pip.getPipStyle('local')} onPointerDown={(e) => pip.onPipPointerDown(e, 'local')}>
-            {pip.localPipMin && (
+          <div className={`rounded-2xl overflow-hidden shadow-2xl group ${localPipMin ? 'cursor-pointer' : ''} border-2 border-slate-600/50`}
+            style={getPipStyle('local')} onPointerDown={(e) => onPipPointerDown(e, 'local')}>
+            {localPipMin && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-800 rounded-2xl px-3"><span className="text-xs text-white font-semibold truncate">你</span></div>
             )}
             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover mirror" />
-            {!pip.localPipMin && (
+            {!localPipMin && (
               <div className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-white font-semibold">你</span>
@@ -382,16 +389,16 @@ export default function MeetPage() {
                 </div>
               </div>
             )}
-            {!pip.localPipMin && (
+            {!localPipMin && (
               <button className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded bg-black/60 text-white text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => { e.stopPropagation(); pip.setLocalPipMin(true) }} onPointerDown={(e) => e.stopPropagation()} title="最小化">−</button>
+                onClick={(e) => { e.stopPropagation(); setLocalPipMin(true) }} onPointerDown={(e) => e.stopPropagation()} title="最小化">−</button>
             )}
-            {!pip.localPipMin && (
-              <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity" onPointerDown={(e) => pip.onResizePointerDown(e, 'local')}>
+            {!localPipMin && (
+              <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity" onPointerDown={(e) => onResizePointerDown(e, 'local')}>
                 <svg viewBox="0 0 16 16" className="w-full h-full text-white/70"><path d="M14 14L8 14L14 8Z" fill="currentColor" /></svg>
               </div>
             )}
-            {!pip.localPipMin && (
+            {!localPipMin && (
               <div className={`absolute inset-0 ring-2 transition-all duration-300 rounded-2xl pointer-events-none ${isScreenSharing ? 'ring-primary-500/50 group-hover:ring-primary-500/80' : 'ring-primary-500/0 group-hover:ring-primary-500/50'}`} />
             )}
           </div>
@@ -435,7 +442,7 @@ export default function MeetPage() {
                     )}
                     <label className="mt-2 flex items-center gap-1.5 cursor-pointer text-xs text-primary-400 hover:text-primary-300 transition-colors">
                       <FaPlus size={10} /> Add more songs
-                      <input ref={music.addMoreInputRef} type="file" accept="audio/*" multiple onChange={music.handleMusicFiles} className="hidden" />
+                      <input ref={addMoreInputRef} type="file" accept="audio/*" multiple onChange={music.handleMusicFiles} className="hidden" />
                     </label>
                   </div>
                   <div className="border-t border-gray-700 p-3">
@@ -491,9 +498,9 @@ export default function MeetPage() {
                     {ytManagedItems.length === 0 ? <p className="text-xs text-gray-500">No YouTube items added</p> : (
                       <div className="space-y-1 mb-3">
                         {ytManagedItems.map((item, i) => (
-                          <div key={`yt-${item.videoId}-${i}`} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${ytManagedPlayingIdxRef.current === i && ytMode ? 'bg-red-500/20 text-red-300' : 'text-gray-300 hover:bg-gray-700/50'}`}
+                          <div key={`yt-${item.videoId}-${i}`} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${ytManagedPlayingIdx === i && ytMode ? 'bg-red-500/20 text-red-300' : 'text-gray-300 hover:bg-gray-700/50'}`}
                             onClick={() => youtube.playYtItem(i)}>
-                            <span className="text-xs w-5 text-right flex-shrink-0">{ytManagedPlayingIdxRef.current === i && ytMode && ytPlaying ? <span className="text-red-400">&#9654;</span> : <span className="text-gray-500">{i + 1}.</span>}</span>
+                            <span className="text-xs w-5 text-right flex-shrink-0">{ytManagedPlayingIdx === i && ytMode && ytPlaying ? <span className="text-red-400">&#9654;</span> : <span className="text-gray-500">{i + 1}.</span>}</span>
                             <span className="text-xs truncate flex-1">{item.title}</span>
                             <button onClick={(e) => { e.stopPropagation(); youtube.removeYtItem(i) }} className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:text-red-400 text-gray-500 transition-opacity"><FaTimes size={10} /></button>
                           </div>
@@ -720,7 +727,7 @@ export default function MeetPage() {
                       className="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:bg-gray-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5">
                       <FaSave size={12} /> {recording.savingEdit ? 'Saving...' : 'Save'}
                     </button>
-                    <button onClick={() => { recording.setEditForm(null) }} className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm transition-colors">Cancel</button>
+                    <button onClick={recording.cancelEditing} className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm transition-colors">Cancel</button>
                   </>
                 )}
                 <button onClick={recording.dismissSummary} className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"><FaTimes size={14} /></button>

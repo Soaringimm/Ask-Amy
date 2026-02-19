@@ -82,6 +82,22 @@ async function requireAuth(req, res) {
   return user;
 }
 
+async function getUserRole(userId) {
+  if (!supabaseAdmin || !userId) return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('aa_profiles')
+      .select('role')
+      .eq('id', userId)
+      .single();
+    if (error) return null;
+    return data?.role || null;
+  } catch (err) {
+    console.error('[auth] Failed to fetch user role:', err.message);
+    return null;
+  }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function collectBody(req, maxBytes = 50 * 1024 * 1024) {
@@ -91,7 +107,9 @@ function collectBody(req, maxBytes = 50 * 1024 * 1024) {
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > maxBytes) {
-        reject(new Error('Body too large'));
+        const err = new Error('Body too large');
+        err.statusCode = 413;
+        reject(err);
         req.destroy();
         return;
       }
@@ -109,14 +127,25 @@ function collectBody(req, maxBytes = 50 * 1024 * 1024) {
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
     const parts = [];
+    let hasFailed = false;
     try {
       const bb = Busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024 } });
 
       bb.on('file', (name, stream, info) => {
         const { filename, mimeType } = info;
         const chunks = [];
+        stream.on('limit', () => {
+          if (hasFailed) return;
+          hasFailed = true;
+          const err = new Error('Body too large');
+          err.statusCode = 413;
+          reject(err);
+          req.unpipe(bb);
+          req.destroy();
+        });
         stream.on('data', (chunk) => chunks.push(chunk));
         stream.on('end', () => {
+          if (hasFailed) return;
           parts.push({
             name,
             filename,
@@ -127,11 +156,16 @@ function parseMultipart(req) {
       });
 
       bb.on('field', (name, value) => {
+        if (hasFailed) return;
         parts.push({ name, data: value });
       });
 
-      bb.on('close', () => resolve(parts));
-      bb.on('error', (err) => reject(err));
+      bb.on('close', () => {
+        if (!hasFailed) resolve(parts);
+      });
+      bb.on('error', (err) => {
+        if (!hasFailed) reject(err);
+      });
 
       req.pipe(bb);
     } catch (err) {
@@ -147,6 +181,28 @@ function sendJson(res, status, data) {
     'Vary': 'Origin',
   });
   res.end(JSON.stringify(data));
+}
+
+function safeAck(callback, payload) {
+  if (typeof callback === 'function') callback(payload);
+}
+
+function normalizeStableId(stableId, fallbackId) {
+  if (typeof stableId !== 'string') return fallbackId;
+  const trimmed = stableId.trim();
+  if (!trimmed) return fallbackId;
+  return trimmed.slice(0, 128);
+}
+
+function extractSocketToken(socket) {
+  const tokenFromAuth = socket.handshake.auth?.token;
+  if (typeof tokenFromAuth === 'string' && tokenFromAuth.trim()) return tokenFromAuth.trim();
+
+  const authHeader = socket.handshake.headers?.authorization;
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  return null;
 }
 
 // Retry wrapper for Gemini API calls (handles 429)
@@ -244,7 +300,7 @@ Rules:
     sendJson(res, 200, { transcript });
   } catch (err) {
     console.error('[transcribe] error:', err.message);
-    sendJson(res, 500, { error: err.message });
+    sendJson(res, err.statusCode || 500, { error: err.message });
   }
 }
 
@@ -303,7 +359,7 @@ ${transcript}`,
     sendJson(res, 200, { summary });
   } catch (err) {
     console.error('[summarize] error:', err.message);
-    sendJson(res, 500, { error: err.message });
+    sendJson(res, err.statusCode || 500, { error: err.message });
   }
 }
 
@@ -357,6 +413,35 @@ const io = new Server(httpServer, {
   pingTimeout: 60000,
 });
 
+io.use(async (socket, next) => {
+  const token = extractSocketToken(socket);
+  if (!token || !supabaseAdmin) {
+    socket.data.user = null;
+    socket.data.userRole = null;
+    next();
+    return;
+  }
+
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      socket.data.user = null;
+      socket.data.userRole = null;
+      next();
+      return;
+    }
+
+    socket.data.user = user;
+    socket.data.userRole = await getUserRole(user.id);
+    next();
+  } catch (err) {
+    console.error('[socket auth] failed:', err.message);
+    socket.data.user = null;
+    socket.data.userRole = null;
+    next();
+  }
+});
+
 function generateRoomId() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let id = '';
@@ -369,17 +454,30 @@ function generateRoomId() {
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id}`);
 
-  socket.on('create-room', (stableId, callback) => {
+  socket.on('create-room', async (stableId, callback) => {
     // If only one arg provided, it might be the callback
     if (typeof stableId === 'function') {
       callback = stableId;
       stableId = socket.id;
     }
+    stableId = normalizeStableId(stableId, socket.id);
+
+    // Server-side authorization: only authenticated admins can create rooms.
+    if (!socket.data.user) {
+      safeAck(callback, { error: 'Authentication required to create room' });
+      return;
+    }
+    const role = socket.data.userRole || await getUserRole(socket.data.user.id);
+    socket.data.userRole = role;
+    if (role !== 'admin') {
+      safeAck(callback, { error: 'Only admin can create meeting rooms' });
+      return;
+    }
 
     // Guard against memory exhaustion (M-3)
     if (rooms.size >= MAX_ROOMS) {
       console.warn(`[create] rejected: server at capacity (${rooms.size} rooms)`);
-      callback({ error: 'Server at capacity, try again later' });
+      safeAck(callback, { error: 'Server at capacity, try again later' });
       return;
     }
 
@@ -396,7 +494,7 @@ io.on('connection', (socket) => {
     socket.data.stableId = stableId;
 
     console.log(`[create] room=${roomId} by ${socket.id} (stableId=${stableId})`);
-    callback({ roomId });
+    safeAck(callback, { roomId });
   });
 
   socket.on('join-room', (roomId, stableId, callback) => {
@@ -405,12 +503,22 @@ io.on('connection', (socket) => {
       callback = stableId;
       stableId = socket.id;
     }
+    stableId = normalizeStableId(stableId, socket.id);
 
+    if (typeof roomId !== 'string') {
+      safeAck(callback, { error: 'Invalid room id' });
+      return;
+    }
     roomId = roomId.toUpperCase().trim();
+    if (!/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/.test(roomId)) {
+      safeAck(callback, { error: 'Invalid meeting ID format' });
+      return;
+    }
+
     const room = rooms.get(roomId);
 
     if (!room) {
-      callback({ error: 'Room not found' });
+      safeAck(callback, { error: 'Room not found' });
       return;
     }
 
@@ -419,7 +527,7 @@ io.on('connection', (socket) => {
     const isReconnecting = disconnectTimers.has(stableId) && stableIdToRoom.get(stableId) === roomId;
 
     if (!isReconnecting && room.size >= 2) {
-      callback({ error: 'Room is full (max 2)' });
+      safeAck(callback, { error: 'Room is full (max 2)' });
       return;
     }
 
@@ -448,10 +556,14 @@ io.on('connection', (socket) => {
 
     socket.to(roomId).emit('peer-joined', socket.id);
     console.log(`[join] room=${roomId} by ${socket.id} (stableId=${stableId}), size=${room.size}`);
-    callback({ ok: true });
+    safeAck(callback, { ok: true });
   });
 
-  socket.on('signal', ({ to, data }) => {
+  socket.on('signal', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    const { to, data } = payload;
+    if (typeof to !== 'string' || !data || typeof data !== 'object') return;
+
     // C-1: Verify the target socket is in the same room as the sender.
     // Without this, any connected socket could signal any other socket.
     const senderRoomId = socket.data.roomId;
