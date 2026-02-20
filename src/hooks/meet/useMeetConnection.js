@@ -415,6 +415,25 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       if (!allowed) { setError(reason); setPhase('lobby'); initInFlightRef.current = false; return }
     }
 
+    // (#10) Fire getUserMedia IMMEDIATELY — before any await — to keep the call inside
+    // the browser's user-activation window. Safari and some Chrome versions silently hang
+    // (or refuse) getUserMedia once the activation is consumed by the first await
+    // (fetchIceServers, getSession, loadSocketIO). The 20-second timer ensures a frozen
+    // permission dialog never leaves the spinner stuck forever.
+    // streamResult captures the resolved stream so the catch block can stop its tracks
+    // even if Promise.all rejects before `stream` can be assigned via destructuring.
+    let streamResult = null
+    const streamPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('无法访问摄像头/麦克风，请检查浏览器权限设置后重试')),
+        20000
+      )
+      navigator.mediaDevices
+        .getUserMedia({ video: getVideoConstraints(), audio: true })
+        .then(s => { clearTimeout(timer); streamResult = s; resolve(s) })
+        .catch(err => { clearTimeout(timer); reject(err) })
+    })
+
     let stream = null // (#2) Track stream so we can stop tracks in catch block
     try {
       await fetchIceServers()
@@ -543,18 +562,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       })
 
       ;[stream] = await Promise.all([
-        // (#10) Wrap getUserMedia with a timeout so a hung permission dialog or
-        // busy device never leaves the "connecting" spinner stuck forever.
-        new Promise((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error('无法访问摄像头/麦克风，请检查浏览器权限设置后重试')),
-            20000
-          )
-          navigator.mediaDevices
-            .getUserMedia({ video: getVideoConstraints(), audio: true })
-            .then(s => { clearTimeout(timer); resolve(s) })
-            .catch(err => { clearTimeout(timer); reject(err) })
-        }),
+        streamPromise, // (#10) already started before any await — gesture context preserved
         // (#3) Socket connect with timeout + reject path — prevents initConnection hanging forever
         new Promise((resolve, reject) => {
           if (socket.connected) { resolve(); return }
@@ -610,8 +618,11 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
         })
       }
     } catch (err) {
-      // (#2) Stop camera/mic tracks if getUserMedia succeeded before the failure
-      if (stream) stream.getTracks().forEach(t => t.stop())
+      // (#2) Stop camera/mic tracks if getUserMedia succeeded before the failure.
+      // Use streamResult (set when getUserMedia resolved) in case Promise.all rejected
+      // before the array destructuring could assign `stream`.
+      const tracksToStop = stream || streamResult
+      if (tracksToStop) tracksToStop.getTracks().forEach(t => t.stop())
       if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
       initInFlightRef.current = false
       setError(err.message || 'Failed to get camera/mic access')
