@@ -521,6 +521,17 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
               console.log('[socket] Re-joined room successfully')
             }
           })
+        } else if (phaseRef.current === 'joining') {
+          // (#9) Reconnected before the initial room join completed (socket dropped during
+          // getUserMedia or before the join-room ack arrived). Since reconnect succeeds each
+          // time, reconnect_failed never fires — so we must bail explicitly here to avoid
+          // the "connecting" spinner being stuck forever.
+          console.warn('[socket] Reconnected during initial join (no roomId) — resetting to lobby')
+          socketRef.current = null // detach so in-flight initConnection bails at its guard
+          socket.disconnect()
+          setError('连接中断，请重试')
+          setPhase('lobby')
+          initInFlightRef.current = false
         }
       })
 
@@ -545,6 +556,14 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       localStreamRef.current = stream
       initInFlightRef.current = false // connection established, allow future re-init
       if (localVideoRef.current) localVideoRef.current.srcObject = stream
+
+      // (#9) Guard: if the reconnect handler cancelled this connection attempt
+      // (socket dropped during getUserMedia, socketRef was nulled), bail cleanly.
+      if (socketRef.current !== socket) {
+        localStreamRef.current = null
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
 
       if (mode === 'create') {
         socket.emit('create-room', stableId, (res = {}) => {
