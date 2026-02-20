@@ -543,7 +543,18 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       })
 
       ;[stream] = await Promise.all([
-        navigator.mediaDevices.getUserMedia({ video: getVideoConstraints(), audio: true }),
+        // (#10) Wrap getUserMedia with a timeout so a hung permission dialog or
+        // busy device never leaves the "connecting" spinner stuck forever.
+        new Promise((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error('无法访问摄像头/麦克风，请检查浏览器权限设置后重试')),
+            20000
+          )
+          navigator.mediaDevices
+            .getUserMedia({ video: getVideoConstraints(), audio: true })
+            .then(s => { clearTimeout(timer); resolve(s) })
+            .catch(err => { clearTimeout(timer); reject(err) })
+        }),
         // (#3) Socket connect with timeout + reject path — prevents initConnection hanging forever
         new Promise((resolve, reject) => {
           if (socket.connected) { resolve(); return }
