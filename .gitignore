@@ -12,8 +12,10 @@ dist
 dist-ssr
 *.local
 
-# Environment variables
+# Environment variables (keep examples/templates)
 .env
+.env.test
+.env.production
 .env.local
 .env.*
 
