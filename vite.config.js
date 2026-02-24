@@ -26,7 +26,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/help-centre': {
-        target: 'https://es_search.jackyzhang.app',
+        target: 'process.env.VITE_SEARCH_BASE || "http://192.168.1.98:3104"',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/help-centre/, '/api/v1/help-centre'),
       },
