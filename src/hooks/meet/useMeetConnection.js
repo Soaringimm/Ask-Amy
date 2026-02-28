@@ -361,7 +361,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
     // (#8) Clear remote audio tracks in-place instead of replacing the object,
     // so external hooks holding a reference to the same MediaStream stay valid.
     remoteAudioStreamRef.current.getTracks().forEach(t => remoteAudioStreamRef.current.removeTrack(t))
-    if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
+    if (socketRef.current) { socketRef.current.removeAllListeners(); socketRef.current.disconnect(); socketRef.current = null }
     iceRestartAttemptsRef.current = 0
     initInFlightRef.current = false
   }
@@ -403,7 +403,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       console.warn('[initConnection] already in flight, ignoring duplicate call')
       return
     }
-    if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
+    if (socketRef.current) { socketRef.current.removeAllListeners(); socketRef.current.disconnect(); socketRef.current = null }
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
     initInFlightRef.current = true
 
@@ -623,7 +623,7 @@ export default function useMeetConnection({ urlRoomId, videoResolution, onMusicS
       // before the array destructuring could assign `stream`.
       const tracksToStop = stream || streamResult
       if (tracksToStop) tracksToStop.getTracks().forEach(t => t.stop())
-      if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null }
+      if (socketRef.current) { socketRef.current.removeAllListeners(); socketRef.current.disconnect(); socketRef.current = null }
       initInFlightRef.current = false
       setError(err.message || 'Failed to get camera/mic access')
       setPhase('lobby')

@@ -136,7 +136,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
   }, [revokeTrackObjectUrls, stopCurrentSource])
 
   function ensureAudioContext() {
-    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed' || audioCtxRef.current.state === 'suspended') {
       const ctx = new (window.AudioContext || window.webkitAudioContext)()
       audioCtxRef.current = ctx
       const dest = ctx.createMediaStreamDestination()
@@ -176,7 +176,7 @@ export default function useMusicPlayer({ socketRef, pcRef, musicStreamDestRef, u
       videoEl.src = track.objectUrl || ''
       videoEl.currentTime = 0
 
-      // Connect video audio to gain graph exactly once per video element lifetime
+      // Connect video audio to gain graph - disconnect old one before creating new
       if (!mediaElementSourceRef.current) {
         const mediaSrc = ctx.createMediaElementSource(videoEl)
         mediaSrc.connect(gainNodeRef.current)

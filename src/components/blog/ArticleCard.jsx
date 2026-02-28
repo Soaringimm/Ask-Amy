@@ -28,7 +28,7 @@ export function ArticleCard({ article, featured = false }) {
       {/* Cover Image */}
       <div className="relative h-52 overflow-hidden" style={{ background: 'linear-gradient(to bottom right, #e0e8ff, #f0f4ff)' }}>
         {cover_image ? (
-          <img
+          <img loading="lazy"
             src={cover_image}
             alt={title}
             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 ease-out"
@@ -119,7 +119,7 @@ export function FeaturedArticleCard({ article }) {
       {/* Cover Image */}
       <div className="relative md:w-2/5 h-64 md:h-auto md:min-h-[320px] overflow-hidden" style={{ background: 'linear-gradient(to bottom right, #c7d4fe, #e0e8ff)' }}>
         {cover_image ? (
-          <img
+          <img loading="lazy"
             src={cover_image}
             alt={title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
