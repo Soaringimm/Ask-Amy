@@ -3,8 +3,10 @@ set -e
 
 echo "🚀 Starting Ask-Amy deployment..."
 
-# Navigate to project directory
-cd /home/jacky/apps/Ask-Amy
+# Server 69 is the only deployment target. The legacy 98 runner must never run
+# this script; the workflow label contract enforces that boundary.
+cd /Users/jacky/apps/ask-amy
+export DOCKER_CONTEXT="${DOCKER_CONTEXT:-colima-platform-production}"
 
 # Ensure we're on main branch
 echo "🔀 Switching to main branch..."

@@ -65,16 +65,17 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ## Server Operations
 
 Production server credentials are stored in `.env`:
-- `PROD_SERVER_HOST`: Server IP (192.168.1.98)
+- `PROD_SERVER_HOST`: Current server IP (192.168.1.69)
 - `PROD_SERVER_USER`: SSH username
 - `PROD_SERVER_PASSWORD`: SSH password
 
-SSH command: `sshpass -p "$PROD_SERVER_PASSWORD" ssh $PROD_SERVER_USER@$PROD_SERVER_HOST`
+Production mutations are confirmation-gated and use the governed 69 deployment lane. Server 98 is
+legacy residual cleanup-only; never deploy, validate, run CI, or use a database there.
 
 ### Deployment
 
-Production directory: `/home/jacky/apps/Ask-Amy/`
-Deploy: `cd /home/jacky/apps/Ask-Amy && git pull && docker compose -f docker-compose.prod.yml build && docker compose -f docker-compose.prod.yml up -d`
+Production checkout: `/Users/jacky/apps/ask-amy` on server 69. Use the repository's current 69-owned
+deployment workflow; do not revive the old direct 98 deploy command.
 
 ### Architecture
 
@@ -88,9 +89,9 @@ Deploy: `cd /home/jacky/apps/Ask-Amy && git pull && docker compose -f docker-com
 
 数据库运行在生产服务器上（不是本地），Supabase 配置可从 `~/immicore/.env` 获取：
 
-- **PostgreSQL**: `postgresql://postgres:<password>@192.168.1.98:5432/postgres`
+- **PostgreSQL**: current governed DSN on server 69 (resolve from the owner-managed runtime env; never hardcode a password)
 - **Supabase API (公网)**: `https://supabase.jackyzhang.app`
-- **Supabase API (内网)**: `http://192.168.1.98:8002`
+- **Supabase API (内网)**: `http://192.168.1.69:8003`
 
 前端应使用公网 URL 以确保验证邮件和密码重置链接正常工作。
 
