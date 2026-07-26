@@ -16,19 +16,21 @@ on:
 jobs:
   deploy:
     name: Deploy Ask-Amy
-    runs-on: self-hosted
+    # Fail closed until the dedicated 69 runner is registered. The residual 98
+    # runner must never match this deployment lane.
+    runs-on: [self-hosted, macOS, ARM64, ask-amy-69]
 
     steps:
       - name: 📦 Get commit info
         id: commit
         run: |
-          cd /home/jacky/apps/Ask-Amy
+          cd /Users/jacky/apps/ask-amy
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "message=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
 
       - name: 🚀 Deploy to server
         run: |
-          cd /home/jacky/apps/Ask-Amy
+          cd /Users/jacky/apps/ask-amy
           bash deploy.sh
 
       - name: ✅ Deployment Summary
