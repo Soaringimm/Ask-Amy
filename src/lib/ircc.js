@@ -1,6 +1,5 @@
-// DEV: vite proxy adds token; PROD: nginx proxy adds token
+// DEV: vite proxy adds token; PROD: nginx proxy adds token server-side
 const API_URL = '/api/help-centre'
-const API_TOKEN = import.meta.env.VITE_SEARCH_SERVICE_TOKEN
 
 /**
  * Detect if text contains Chinese characters.
@@ -30,11 +29,7 @@ export async function searchQuestions(query, topK = 10) {
     url.searchParams.append('top_k', topK)
     url.searchParams.append('lang', lang)
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
-      },
-    })
+    const response = await fetch(url.toString())
 
     if (!response.ok) {
       throw new Error(`Search failed: ${response.status} ${response.statusText}`)
@@ -60,11 +55,7 @@ export async function getQuestionDetail(qnum, lang = 'zh') {
     url.searchParams.append('lang', lang)
     url.searchParams.append('format', 'html')
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
-      },
-    })
+    const response = await fetch(url.toString())
 
     if (!response.ok) {
       if (response.status === 404) {

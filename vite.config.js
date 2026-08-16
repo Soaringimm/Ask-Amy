@@ -29,6 +29,14 @@ export default defineConfig({
         target: 'https://es_search.jackyzhang.app',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/help-centre/, '/api/v1/help-centre'),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            const token = process.env.HELP_CENTRE_API_KEY || process.env.SEARCH_SERVICE_TOKEN || process.env.VITE_SEARCH_SERVICE_TOKEN
+            if (token) {
+              proxyReq.setHeader('Authorization', `Bearer ${token}`)
+            }
+          })
+        },
       },
       '/socket.io': {
         target: 'http://localhost:3100',
