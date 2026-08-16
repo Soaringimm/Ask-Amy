@@ -28,9 +28,9 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 # Runtime environment variable for token
-ENV SEARCH_SERVICE_TOKEN=""
+ENV ASK_AMY_API_KEY=""
 
 EXPOSE 80
 
 # Use envsubst to replace variables in nginx config at runtime
-CMD ["/bin/sh", "-c", "envsubst '${SEARCH_SERVICE_TOKEN}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "envsubst '${ASK_AMY_API_KEY}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]

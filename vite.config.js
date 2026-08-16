@@ -31,7 +31,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/help-centre/, '/api/v1/help-centre'),
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq) => {
-            const token = process.env.HELP_CENTRE_API_KEY || process.env.SEARCH_SERVICE_TOKEN || process.env.VITE_SEARCH_SERVICE_TOKEN
+            const token = process.env.ASK_AMY_API_KEY || process.env.HELP_CENTRE_API_KEY
             if (token) {
               proxyReq.setHeader('Authorization', `Bearer ${token}`)
             }

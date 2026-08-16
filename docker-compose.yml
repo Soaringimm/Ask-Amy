@@ -11,7 +11,7 @@ services:
         VITE_CAL_API_KEY: ${VITE_CAL_API_KEY}
     container_name: ask-amy
     environment:
-      - SEARCH_SERVICE_TOKEN=${SEARCH_SERVICE_TOKEN}
+      - ASK_AMY_API_KEY=${ASK_AMY_API_KEY}
     ports:
       - "8507:80"
     networks:
