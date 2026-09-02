@@ -1,3 +1,5 @@
+> Governance: before non-trivial work read `/Users/jacky/.agents/platform-vault/CONSUME.md` and the matching `projects/<id>.yaml` card.
+
 <!-- OPENSPEC:START -->
 # OpenSpec Instructions
 
