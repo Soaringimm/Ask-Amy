@@ -1,6 +1,6 @@
 import { NavLink, useNavigate, Link } from 'react-router-dom'
 import { FaSignOutAlt, FaCalendarAlt, FaBook, FaComments, FaUsers, FaHome, FaLightbulb } from 'react-icons/fa'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 export default function AdminLayout({ children }) {
   const navigate = useNavigate()

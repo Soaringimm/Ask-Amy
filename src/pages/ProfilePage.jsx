@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { FaUser, FaCamera, FaSave, FaSpinner, FaCheck, FaEye, FaEyeSlash } from 'react-icons/fa'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 import { supabase } from '../lib/supabase'
 
 export default function ProfilePage() {
@@ -15,7 +15,7 @@ export default function ProfilePage() {
 
   // Password change state
   const [showPasswordForm, setShowPasswordForm] = useState(false)
-  const [currentPassword, setCurrentPassword] = useState('')
+
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -129,7 +129,7 @@ export default function ProfilePage() {
       await updatePassword(newPassword)
       setPasswordSuccess(true)
       setShowPasswordForm(false)
-      setCurrentPassword('')
+
       setNewPassword('')
       setConfirmPassword('')
       setTimeout(() => setPasswordSuccess(false), 3000)

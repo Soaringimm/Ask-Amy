@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FaEnvelope, FaCheck } from 'react-icons/fa'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')

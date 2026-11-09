@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { FaHeart, FaSpinner, FaBookmark } from 'react-icons/fa'
 import { format } from 'date-fns'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 import { supabase } from '../lib/supabase'
 
 export default function FavoritesPage() {
@@ -12,54 +12,56 @@ export default function FavoritesPage() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    if (user) {
-      fetchFavorites()
-    }
-  }, [user])
+    if (!user) return
 
-  const fetchFavorites = async () => {
-    setLoading(true)
-    setError(null)
+    const fetchFavorites = async () => {
+      setLoading(true)
+      setError(null)
 
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('aa_favorites')
-        .select(`
-          id,
-          created_at,
-          article:aa_articles (
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('aa_favorites')
+          .select(`
             id,
-            title,
-            slug,
-            excerpt,
-            cover_image,
-            published_at,
-            reading_time,
-            aa_article_tags (
-              tag:aa_tags (
-                id,
-                name,
-                slug,
-                color
+            created_at,
+            article:aa_articles (
+              id,
+              title,
+              slug,
+              excerpt,
+              cover_image,
+              published_at,
+              reading_time,
+              aa_article_tags (
+                tag:aa_tags (
+                  id,
+                  name,
+                  slug,
+                  color
+                )
               )
             )
-          )
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
 
-      if (fetchError) throw fetchError
+        if (fetchError) throw fetchError
 
-      // Filter out favorites where article might be deleted or unpublished
-      const validFavorites = data.filter(f => f.article && f.article.published_at)
-      setFavorites(validFavorites)
-    } catch (err) {
-      console.error('Error fetching favorites:', err)
-      setError('加载收藏列表失败')
-    } finally {
-      setLoading(false)
+        // Filter out favorites where article might be deleted or unpublished
+        const validFavorites = data.filter(f => f.article && f.article.published_at)
+        setFavorites(validFavorites)
+      } catch (err) {
+        console.error('Error fetching favorites:', err)
+        setError('加载收藏列表失败')
+      } finally {
+        setLoading(false)
+      }
     }
-  }
+
+    fetchFavorites()
+  }, [user])
+
+
 
   const handleRemoveFavorite = async (favoriteId) => {
     try {

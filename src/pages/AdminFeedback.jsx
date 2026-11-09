@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 import AdminLayout from '../layouts/AdminLayout'
 import { format } from 'date-fns'
 import {
@@ -81,12 +81,8 @@ export default function AdminFeedback() {
   const [imageUrls, setImageUrls] = useState({})
   const [previewImage, setPreviewImage] = useState(null)
 
-  useEffect(() => {
-    fetchFeedback()
-    fetchStats()
-  }, [currentPage, searchQuery, filterType, filterStatus, filterPriority])
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const { count: total } = await supabase
         .from('aa_feedback').select('*', { count: 'exact', head: true })
@@ -100,9 +96,9 @@ export default function AdminFeedback() {
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
-  }
+  }, [])
 
-  const fetchFeedback = async () => {
+  const fetchFeedback = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -131,7 +127,12 @@ export default function AdminFeedback() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentPage, searchQuery, filterType, filterStatus, filterPriority])
+
+  useEffect(() => {
+    fetchFeedback()
+    fetchStats()
+  }, [fetchFeedback, fetchStats])
 
   const handleCreate = async () => {
     if (!createForm.title.trim() || !createForm.description.trim()) {

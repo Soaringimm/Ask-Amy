@@ -76,7 +76,7 @@ async function generateArticles() {
     console.log(`\n处理主题: ${topic.name} (${topic.name_cn})`);
 
     // 抓取英文内容
-    const enContent = await fetchTopicContent(topic.id, 'en');
+    await fetchTopicContent(topic.id, 'en');
 
     // 抓取法文内容（如果需要）
     // const frContent = await fetchTopicContent(topic.id, 'fr');

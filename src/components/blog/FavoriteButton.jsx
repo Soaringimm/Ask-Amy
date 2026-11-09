@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaHeart, FaRegHeart, FaSpinner } from 'react-icons/fa'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../../contexts/useAuth'
 import { supabase } from '../../lib/supabase'
 
 export default function FavoriteButton({ articleId, size = 'md', showCount = false }) {
@@ -19,9 +19,9 @@ export default function FavoriteButton({ articleId, size = 'md', showCount = fal
         fetchFavoriteCount()
       }
     }
-  }, [articleId, user])
+  }, [articleId, user, showCount, checkFavoriteStatus, fetchFavoriteCount])
 
-  const checkFavoriteStatus = async () => {
+  const checkFavoriteStatus = useCallback(async () => {
     if (!user) {
       setIsFavorited(false)
       setInitialLoading(false)
@@ -46,9 +46,9 @@ export default function FavoriteButton({ articleId, size = 'md', showCount = fal
     } finally {
       setInitialLoading(false)
     }
-  }
+  }, [user, articleId])
 
-  const fetchFavoriteCount = async () => {
+  const fetchFavoriteCount = useCallback(async () => {
     try {
       const { count, error } = await supabase
         .from('aa_favorites')
@@ -60,7 +60,7 @@ export default function FavoriteButton({ articleId, size = 'md', showCount = fal
     } catch (err) {
       console.error('Error fetching favorite count:', err)
     }
-  }
+  }, [articleId])
 
   const handleToggleFavorite = async (e) => {
     e.preventDefault()
