@@ -30,7 +30,7 @@ import { chromium } from 'playwright';
     process.exit(1);
   }
 
-  const loginUrl = 'http://localhost:5173/login';  console.log('Filling credentials...');
+  console.log('Filling credentials...');
   await page.fill('#email', email);
   await page.fill('#password', password);
 
@@ -43,7 +43,7 @@ import { chromium } from 'playwright';
       page.waitForURL('http://localhost:5173/', { timeout: 5000 }),
       page.waitForSelector('.text-red-700', { timeout: 5000 }) // Error message class from Login.jsx
     ]);
-  } catch (e) {
+  } catch {
     // Timeout implies we stayed on the page or something else happened
   }
 

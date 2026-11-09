@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { FaUser, FaReply, FaSpinner, FaCheck } from 'react-icons/fa'
 import { supabase } from '../../lib/supabase'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../../contexts/useAuth'
 
 // Comment form component
 function CommentForm({ articleId, parentId = null, onSuccess, onCancel }) {
@@ -244,11 +244,7 @@ export function Comments({ articleId }) {
   const [comments, setComments] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetchComments()
-  }, [articleId])
-
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     setLoading(true)
     try {
       const { data, error } = await supabase
@@ -282,7 +278,11 @@ export function Comments({ articleId }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [articleId])
+
+  useEffect(() => {
+    fetchComments()
+  }, [fetchComments])
 
   return (
     <section className="mt-12 pt-8 border-t">

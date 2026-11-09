@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { format } from 'date-fns'
 import {
   FaUsers,
@@ -42,12 +42,9 @@ export default function AdminUsers() {
     todayNew: 0,
   })
 
-  useEffect(() => {
-    fetchUsers()
-    fetchStats()
-  }, [currentPage, sortField, sortOrder, filterRole, filterStatus, searchQuery])
 
-  const fetchStats = async () => {
+
+  const fetchStats = useCallback(async () => {
     try {
       // Total users
       const { count: total } = await supabase
@@ -83,9 +80,9 @@ export default function AdminUsers() {
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
-  }
+  }, [])
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -129,7 +126,12 @@ export default function AdminUsers() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentPage, sortField, sortOrder, filterRole, filterStatus, searchQuery])
+
+  useEffect(() => {
+    fetchUsers()
+    fetchStats()
+  }, [fetchUsers, fetchStats])
 
   const handleSort = (field) => {
     if (sortField === field) {

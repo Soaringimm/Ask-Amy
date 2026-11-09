@@ -9,51 +9,53 @@ export function RelatedArticles({ currentArticleId, tags = [], limit = 3 }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchRelatedArticles()
-  }, [currentArticleId, tags])
+    const fetchRelatedArticles = async () => {
+      setLoading(true)
+      try {
+        let query = supabase
+          .from('aa_articles')
+          .select('id, title, slug, excerpt, published_at, cover_image')
+          .not('published_at', 'is', null)
+          .neq('id', currentArticleId)
+          .order('published_at', { ascending: false })
+          .limit(limit)
 
-  const fetchRelatedArticles = async () => {
-    setLoading(true)
-    try {
-      let query = supabase
-        .from('aa_articles')
-        .select('id, title, slug, excerpt, published_at, cover_image')
-        .not('published_at', 'is', null)
-        .neq('id', currentArticleId)
-        .order('published_at', { ascending: false })
-        .limit(limit)
+        // If we have tags, try to find articles with matching tags
+        if (tags.length > 0) {
+          const tagIds = tags.map((t) => t.id)
+          const { data: relatedByTags } = await supabase
+            .from('aa_article_tags')
+            .select('article_id')
+            .in('tag_id', tagIds)
+            .neq('article_id', currentArticleId)
 
-      // If we have tags, try to find articles with matching tags
-      if (tags.length > 0) {
-        const tagIds = tags.map((t) => t.id)
-        const { data: relatedByTags } = await supabase
-          .from('aa_article_tags')
-          .select('article_id')
-          .in('tag_id', tagIds)
-          .neq('article_id', currentArticleId)
-
-        if (relatedByTags && relatedByTags.length > 0) {
-          const articleIds = [...new Set(relatedByTags.map((r) => r.article_id))]
-          query = supabase
-            .from('aa_articles')
-            .select('id, title, slug, excerpt, published_at, cover_image')
-            .in('id', articleIds)
-            .not('published_at', 'is', null)
-            .order('published_at', { ascending: false })
-            .limit(limit)
+          if (relatedByTags && relatedByTags.length > 0) {
+            const articleIds = [...new Set(relatedByTags.map((r) => r.article_id))]
+            query = supabase
+              .from('aa_articles')
+              .select('id, title, slug, excerpt, published_at, cover_image')
+              .in('id', articleIds)
+              .not('published_at', 'is', null)
+              .order('published_at', { ascending: false })
+              .limit(limit)
+          }
         }
+
+        const { data, error } = await query
+
+        if (error) throw error
+        setArticles(data || [])
+      } catch (err) {
+        console.error('Error fetching related articles:', err)
+      } finally {
+        setLoading(false)
       }
-
-      const { data, error } = await query
-
-      if (error) throw error
-      setArticles(data || [])
-    } catch (err) {
-      console.error('Error fetching related articles:', err)
-    } finally {
-      setLoading(false)
     }
-  }
+
+    fetchRelatedArticles()
+  }, [currentArticleId, tags, limit])
+
+
 
   if (loading) {
     return (

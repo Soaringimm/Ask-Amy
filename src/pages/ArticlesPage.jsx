@@ -30,7 +30,7 @@ export default function ArticlesPage() {
     error
   } = useArticles({ page: currentPage, tag: selectedTag, search: searchQuery })
 
-  const articles = articlesData?.articles || []
+  const articles = useMemo(() => articlesData?.articles || [], [articlesData?.articles])
   const totalCount = articlesData?.totalCount || 0
 
   // Sync local search value with URL param on mount

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { FaLock, FaEye, FaEyeSlash, FaCheck } from 'react-icons/fa'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 import { supabase } from '../lib/supabase'
 
 export default function ResetPasswordPage() {
@@ -13,7 +13,7 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false)
   const [validSession, setValidSession] = useState(false)
   const [checking, setChecking] = useState(true)
-  const navigate = useNavigate()
+
   const { updatePassword } = useAuth()
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export default function ResetPasswordPage() {
     }
 
     // Listen for auth state change (recovery link)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setValidSession(true)
         setChecking(false)

@@ -14,7 +14,7 @@ import {
   FaFileAlt
 } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 import { getRecordings, updateRecording, deleteRecording } from '../lib/meetRecording'
 
 export default function RecordingsPage() {
@@ -29,22 +29,24 @@ export default function RecordingsPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState(null)
 
   useEffect(() => {
-    if (user) {
-      loadRecordings()
+    if (!user) return
+
+    const loadRecordings = async () => {
+      try {
+        setLoading(true)
+        const data = await getRecordings(user.id)
+        setRecordings(data || [])
+      } catch (err) {
+        console.error('Failed to load recordings:', err)
+      } finally {
+        setLoading(false)
+      }
     }
+
+    loadRecordings()
   }, [user])
 
-  const loadRecordings = async () => {
-    try {
-      setLoading(true)
-      const data = await getRecordings(user.id)
-      setRecordings(data || [])
-    } catch (err) {
-      console.error('Failed to load recordings:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+
 
   const toggleExpand = (id) => {
     setExpandedId(expandedId === id ? null : id)

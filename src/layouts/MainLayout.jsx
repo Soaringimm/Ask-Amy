@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { FaHome, FaComments, FaNewspaper, FaSearch, FaUser, FaSignOutAlt, FaHeart, FaCog, FaVideo } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 export default function MainLayout({ children }) {
   const { user, profile, signOut, isAdmin } = useAuth()

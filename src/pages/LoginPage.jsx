@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { FaEye, FaEyeSlash, FaArrowRight } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 const REMEMBER_EMAIL_KEY = 'askamy_remember_email'
 

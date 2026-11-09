@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import AdminLayout from '../layouts/AdminLayout'
@@ -15,12 +15,8 @@ export default function AdminComments() {
   const [filter, setFilter] = useState('pending') // pending, approved, all
   const [stats, setStats] = useState({ pending: 0, approved: 0, total: 0 })
 
-  useEffect(() => {
-    fetchComments()
-    fetchStats()
-  }, [filter])
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const { count: total } = await supabase
         .from('aa_comments')
@@ -44,9 +40,9 @@ export default function AdminComments() {
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
-  }
+  }, [])
 
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -74,7 +70,12 @@ export default function AdminComments() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filter])
+
+  useEffect(() => {
+    fetchComments()
+    fetchStats()
+  }, [fetchComments, fetchStats])
 
   const handleApprove = async (id) => {
     try {

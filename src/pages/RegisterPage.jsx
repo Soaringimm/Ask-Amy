@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FaEye, FaEyeSlash, FaArrowRight, FaCheckCircle } from 'react-icons/fa'
 import { HiSparkles } from 'react-icons/hi2'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
